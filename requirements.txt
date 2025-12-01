@@ -2,7 +2,6 @@
 pyinstaller
 pyautogui
 requests
-sounddevice
-numpy
+# ... andere Pakete ...
 keyboard
-# ... alle anderen Pakete
+pytesseract
