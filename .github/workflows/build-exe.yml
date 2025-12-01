@@ -1,8 +1,6 @@
 name: Build Lotro-Speach EXE (Manuelle Ausführung)
 
 on:
-  # Entfernt den automatischen Start bei einem 'push'.
-  # Der Workflow kann nun nur über die GitHub Actions-Oberfläche gestartet werden.
   workflow_dispatch:
     inputs:
       reason:
@@ -21,19 +19,19 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-        cache: 'pip'
+        cache: 'pip' # Bleibt drin, da requirements.txt existiert
 
-    - name: 3. Abhängigkeiten installieren
-      # Geht davon aus, dass Ihre Python-Abhängigkeiten in requirements.txt aufgelistet sind.
+    - name: 3. Abhängigkeiten und PyInstaller installieren
+      # Installiert alle Pakete aus der vorhandenen requirements.txt, die PyInstaller enthalten sollte.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller
 
-    - name: 4. EXE-Datei mit PyInstaller erstellen
-      # WICHTIG: Ersetzen Sie 'main.py' durch den tatsächlichen Namen Ihres Haupt-Python-Skripts!
+    - name: 4. EXE-Datei mit PyInstaller erstellen (KORRIGIERT!)
+      # WICHTIG: LotroSpeach.py ist die Startdatei.
+      # --hidden-import=keyboard behebt den Fehler aus dem letzten Schritt.
       run: |
-        pyinstaller --onefile --name "Lotro-Speach" main.py
+        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard LotroSpeach.py
 
     - name: 5. Artefakt hochladen
       uses: actions/upload-artifact@v4
