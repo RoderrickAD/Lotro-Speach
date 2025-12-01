@@ -1,14 +1,17 @@
-name: Build Lotro-Speach EXE (PyInstaller)
+name: Build Lotro-Speach EXE (Manuelle Ausführung)
 
 on:
-  push:
-    branches:
-      - main  # Führt den Workflow bei jedem Push auf den main-Branch aus
-  workflow_dispatch: # Ermöglicht die manuelle Ausführung über die GitHub-Oberfläche
+  # Entfernt den automatischen Start bei einem 'push'.
+  # Der Workflow kann nun nur über die GitHub Actions-Oberfläche gestartet werden.
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Grund für die manuelle Erstellung (optional)'
+        required: false
 
 jobs:
   build_windows_exe:
-    runs-on: windows-latest # Windows-Runner ist notwendig, um eine Windows-EXE zu erstellen
+    runs-on: windows-latest
 
     steps:
     - name: 1. Code auschecken
@@ -17,22 +20,18 @@ jobs:
     - name: 2. Python 3.x einrichten
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x' 
-        # Caching der Abhängigkeiten für schnellere Builds aktivieren
+        python-version: '3.x'
         cache: 'pip'
 
     - name: 3. Abhängigkeiten installieren
       # Geht davon aus, dass Ihre Python-Abhängigkeiten in requirements.txt aufgelistet sind.
-      # Wenn Sie keine requirements.txt haben, müssen Sie die erforderlichen Pakete hier auflisten.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pyinstaller
 
     - name: 4. EXE-Datei mit PyInstaller erstellen
-      # WICHTIG: Ersetzen Sie 'main.py' durch den tatsächlichen Namen Ihres Haupt-Python-Skripts.
-      # Der Befehl '--onefile' erstellt eine einzelne, selbstständige EXE-Datei.
-      # Der Name der resultierenden EXE-Datei wird "Lotro-Speach.exe" sein.
+      # WICHTIG: Ersetzen Sie 'main.py' durch den tatsächlichen Namen Ihres Haupt-Python-Skripts!
       run: |
         pyinstaller --onefile --name "Lotro-Speach" main.py
 
@@ -40,5 +39,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Lotro-Speach-Executable-Windows
-        path: dist/Lotro-Speach.exe # Pfad zur erstellten EXE-Datei
-        retention-days: 7 # Wie lange das Artefakt gespeichert werden soll
+        path: dist/Lotro-Speach.exe
+        retention-days: 7
