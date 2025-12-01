@@ -1,0 +1,9 @@
+# Tools, die für die Erstellung der EXE (im GitHub Action) notwendig sind
+pyinstaller
+
+# Abhängigkeiten, die Ihr Lotro-Speach-Projekt benötigt
+pyautogui
+requests
+sounddevice
+numpy
+# Fügen Sie hier JEDE andere Bibliothek hinzu, die Sie in Ihrem Code importieren
