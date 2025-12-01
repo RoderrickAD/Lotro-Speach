@@ -5,3 +5,4 @@ requests
 # ... andere Pakete ...
 keyboard
 pytesseract
+opencv-python
