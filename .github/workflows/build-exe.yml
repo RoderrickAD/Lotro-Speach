@@ -27,11 +27,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: 4. EXE-Datei mit PyInstaller erstellen (KORRIGIERT!)
-      # WICHTIG: LotroSpeach.py ist die Startdatei.
-      # --hidden-import=keyboard behebt den Fehler aus dem letzten Schritt.
+     - name: 4. EXE-Datei mit PyInstaller erstellen (KORRIGIERT!)
       run: |
-        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard LotroSpeach.py
+        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract LotroSpeach.py
 
     - name: 5. Artefakt hochladen
       uses: actions/upload-artifact@v4
