@@ -1,15 +1,8 @@
-# Tools, die für die Erstellung der EXE (im GitHub Action) notwendig sind
+# Beispiel-Inhalt Ihrer requirements.txt
 pyinstaller
-
-# Abhängigkeiten, die Ihr Lotro-Speach-Projekt benötigt
 pyautogui
 requests
 sounddevice
 numpy
-# Fügen Sie hier JEDE andere Bibliothek hinzu, die Sie in Ihrem Code importieren
-pygame
-pytesseract
-Pillow
 keyboard
-opencv-python
-mss
+# ... alle anderen Pakete
