@@ -32,7 +32,7 @@ jobs:
       # Start-Skript: LotroSpeach.py
       # Hidden Imports: Fügt keyboard und pytesseract hinzu, um 'ModuleNotFoundError' beim Start der EXE zu vermeiden.
       run: |
-        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract LotroSpeach.py
+        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract main.py
 
     - name: 5. Artefakt hochladen
       uses: actions/upload-artifact@v4
