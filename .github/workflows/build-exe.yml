@@ -1,6 +1,7 @@
 name: Build Lotro-Speach EXE (Manuelle Ausführung)
 
 on:
+  # Ermöglicht die manuelle Ausführung über die GitHub-Oberfläche
   workflow_dispatch:
     inputs:
       reason:
@@ -9,7 +10,7 @@ on:
 
 jobs:
   build_windows_exe:
-    runs-on: windows-latest
+    runs-on: windows-latest # Windows-Runner ist für eine Windows-EXE notwendig
 
     steps:
     - name: 1. Code auschecken
@@ -19,15 +20,17 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-        cache: 'pip' # Bleibt drin, da requirements.txt existiert
+        cache: 'pip'
 
     - name: 3. Abhängigkeiten und PyInstaller installieren
-      # Installiert alle Pakete aus der vorhandenen requirements.txt, die PyInstaller enthalten sollte.
+      # Installiert alle Pakete aus der requirements.txt (muss pyinstaller, keyboard und pytesseract enthalten)
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-     - name: 4. EXE-Datei mit PyInstaller erstellen (KORRIGIERT!)
+    - name: 4. EXE-Datei mit PyInstaller erstellen (KORRIGIERT!)
+      # Start-Skript: LotroSpeach.py
+      # Hidden Imports: Fügt keyboard und pytesseract hinzu, um 'ModuleNotFoundError' beim Start der EXE zu vermeiden.
       run: |
         pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract LotroSpeach.py
 
