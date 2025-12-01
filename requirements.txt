@@ -7,3 +7,9 @@ requests
 sounddevice
 numpy
 # Fügen Sie hier JEDE andere Bibliothek hinzu, die Sie in Ihrem Code importieren
+pygame
+pytesseract
+Pillow
+keyboard
+opencv-python
+mss
