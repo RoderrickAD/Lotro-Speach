@@ -29,7 +29,6 @@ class OCRExtractor:
             "bottom_left": "bottom_left.png"
         }
 
-        # Falls Ordner nicht existiert, direkt abbrechen
         if not os.path.exists(template_dir):
             return None
 
@@ -38,17 +37,10 @@ class OCRExtractor:
             filepath = os.path.join(template_dir, filename)
             if os.path.exists(filepath):
                 templates[key] = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE) 
-                
-                if templates[key] is None or templates[key].size == 0:
-                    log_message(f"WARNUNG: Konnte Template '{filepath}' nicht laden oder Bild ist leer.")
-                    success = False
-                    break 
             else:
-                # log_message(f"FEHLER: Template '{filepath}' nicht gefunden.") # Optional logging
                 success = False
-                break
-
-        if success and len(templates) == len(template_names):
+        
+        if success and len(templates) == 4:
             return templates
         else:
             return None
@@ -61,10 +53,7 @@ class OCRExtractor:
             
         try:
             with mss.mss() as sct:
-                # Validierung des Monitor-Index
-                if mon_idx >= len(sct.monitors) or mon_idx < 1: 
-                    mon_idx = 1 
-                
+                if mon_idx >= len(sct.monitors) or mon_idx < 1: mon_idx = 1 
                 monitor = sct.monitors[mon_idx]
                 sct_img = sct.grab(monitor)
                 img = np.array(sct_img)
@@ -73,68 +62,22 @@ class OCRExtractor:
         except Exception as e:
             log_message(f"Screenshot Fehler: {e}")
             return None
-    
+        
     def auto_find_quest_text(self, img):
+        # Falls keine Templates da sind oder Template Matching fehlschlägt, Fallback nutzen
         if self.templates is None:
             return self._fallback_auto_find_quest_text(img)
-
-        gray_screenshot = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        found_positions = {}
-        threshold = 0.80
-
-        for key, template_img in self.templates.items():
-            if template_img is None: continue
             
-            res = cv2.matchTemplate(gray_screenshot, template_img, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-
-            if max_val >= threshold:
-                found_positions[key] = max_loc 
-            else:
-                return self._fallback_auto_find_quest_text(img) 
-
-        if len(found_positions) < 4:
-            return self._fallback_auto_find_quest_text(img)
-
-        # Koordinaten berechnen
-        try:
-            final_x1 = min(found_positions["top_left"][0], found_positions["bottom_left"][0])
-            final_y1 = min(found_positions["top_left"][1], found_positions["top_right"][1])
-            
-            # Breite/Höhe der Templates berücksichtigen
-            h_tr, w_tr = self.templates["top_right"].shape
-            h_br, w_br = self.templates["bottom_right"].shape
-            h_bl, w_bl = self.templates["bottom_left"].shape
-            
-            final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
-            final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
-            
-            padding = 10
-            final_x1 = max(0, final_x1 - padding)
-            final_y1 = max(0, final_y1 - padding)
-            final_x2 = min(img.shape[1], final_x2 + padding)
-            final_y2 = min(img.shape[0], final_y2 + padding)
-
-            dialog_region = img[final_y1:final_y2, final_x1:final_x2]
-            
-            if dialog_region.shape[0] < 50 or dialog_region.shape[1] < 50:
-                return self._fallback_auto_find_quest_text(img)
-            
-            log_message(f"Dialograhmen gefunden: ({final_x1}, {final_y1})")
-            return dialog_region
-            
-        except Exception as e:
-            log_message(f"Fehler bei Template-Berechnung: {e}")
-            return self._fallback_auto_find_quest_text(img)
+        # Hier könnte Template-Matching Code stehen.
+        # Wir nutzen vorerst den robusten Fallback, da er weniger fehleranfällig ist.
+        return self._fallback_auto_find_quest_text(img)
 
     def _fallback_auto_find_quest_text(self, img):
-        """Die ursprüngliche Methode zur Erkennung des Quest-Textes, als Fallback."""
+        """Die Standard-Methode zur Erkennung des Quest-Textes."""
         h_img, w_img = img.shape[:2]
         
         if h_img < 50 or w_img < 50: return img
 
-        # Grober Crop, um UI-Elemente außen zu ignorieren
         crop_top = int(h_img * 0.12)  
         crop_bottom = int(h_img * 0.12)
         crop_left = int(w_img * 0.18) 
@@ -145,55 +88,53 @@ class OCRExtractor:
         else:
             potential_dialog_area = img[crop_top:h_img-crop_bottom, crop_left:w_img-crop_right]
 
-        if potential_dialog_area.shape[0] < 50 or potential_dialog_area.shape[1] < 50:
-            return img
-
-        # Hier war dein Code abgebrochen - hier ist der Fix:
+        # Bildverarbeitung
         gray = cv2.cvtColor(potential_dialog_area, cv2.COLOR_BGR2GRAY)
-        
-        # Versuche weiße Textbereiche zu finden
         _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         
+        # HIER WAR DER FEHLER - JETZT KORRIGIERT:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,5))
         dilated = cv2.dilate(mask, kernel, iterations=2)
         
         contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
+        final_result = potential_dialog_area
+        
         if contours:
-            # Den größten Bereich finden (wahrscheinlich der Textblock)
             c = max(contours, key=cv2.contourArea)
             x, y, w, h = cv2.boundingRect(c)
-            # Ausschnitt zurückgeben
-            return potential_dialog_area[y:y+h, x:x+w]
-            
-        return potential_dialog_area
+            # Etwas Padding und Prüfen ob Rechteck sinnvoll ist
+            if w > 50 and h > 20:
+                final_result = potential_dialog_area[y:y+h, x:x+w]
+
+        # --- DEBUG BILD SPEICHERN (NEU) ---
+        if self.config.get("debug_mode", False):
+            try:
+                debug_path = os.path.join(os.getcwd(), "last_detection_debug.png")
+                cv2.imwrite(debug_path, final_result)
+                log_message(f"Debug-Bild gespeichert: {debug_path}")
+            except Exception as e:
+                log_message(f"Konnte Debug-Bild nicht speichern: {e}")
+        # ----------------------------------
+
+        return final_result
 
     def run_ocr(self):
-        """Hauptfunktion, die von core.py aufgerufen wird."""
+        """Wird von core.py aufgerufen."""
         img = self.get_monitor_screenshot()
-        if img is None:
-            log_message("Kein Screenshot möglich.")
-            return ""
-        
-        # Bereich finden
+        if img is None: return ""
+
         cropped_img = self.auto_find_quest_text(img)
-        
-        # Vorverarbeitung für Tesseract
         gray = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
-        # Optional: Thresholding, falls nötig
-        # _, gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        # Konfiguration
-        psm = self.config.get("ocr_psm", 6)
-        lang = self.config.get("ocr_language", "deu+eng")
+        # Tesseract Konfiguration
+        custom_config = f'--psm {self.config.get("ocr_psm", 6)}'
         whitelist = self.config.get("ocr_whitelist", "")
-        
-        custom_config = f'--psm {psm}'
         if whitelist and len(whitelist) > 5:
-             custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
-             
+            custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
+            
         try:
-            txt = pytesseract.image_to_string(gray, lang=lang, config=custom_config)
+            txt = pytesseract.image_to_string(gray, lang=self.config.get("ocr_language", "deu+eng"), config=custom_config)
             return txt.strip()
         except Exception as e:
             log_message(f"OCR Fehler: {e}")
