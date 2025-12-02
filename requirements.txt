@@ -1,9 +1,0 @@
-pyinstaller
-pyautogui
-requests
-keyboard
-pytesseract
-opencv-python
-mss
-pygame
-numpy
