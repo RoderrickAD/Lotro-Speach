@@ -1,310 +1,289 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
+from PIL import Image, ImageTk  # Benötigt: pip install Pillow
 import threading
-import time
 import os
 import keyboard
-from core import CoreEngine # NEUE IMPORT
+from core import CoreEngine
 from utils import save_config, log_message
 
-# --- LOTRO FARBPALETTE ---
-COLOR_BG_MAIN = "#191b1e"       # Sehr dunkles Grau (Hintergrund)
-COLOR_BG_FRAME = "#25282d"      # Etwas helleres Grau (Container)
-COLOR_TEXT_GOLD = "#d4af37"     # LOTRO Gold (Titel/Wichtige Infos)
-COLOR_TEXT_SILVER = "#e6e6e6"   # Silber (Normaler Text - Erhöhter Kontrast)
-COLOR_BTN_BG = "#3d424b"        # Button Hintergrund
-COLOR_BTN_FG = "#d4af37"        # Button Text (Gold)
-COLOR_ENTRY_BG = "#0f0f0f"      # Eingabefelder Schwarz
-COLOR_ACCENT = "#782221"        # Dunkelrot (für Fehler/Wichtige Info)
-COLOR_STATUS_READY = "#4caf50"  # Grün
-COLOR_STATUS_SCAN = "#d4af37"   # Gold
-COLOR_STATUS_TTS = "#4facfe"    # Blau
+# --- LOTRO THEME COLORS ---
+COLOR_BG_DARK = "#1a1110"       # Sehr dunkles Braun/Schwarz (Mordor)
+COLOR_BG_PANEL = "#2b221b"      # Dunkles Leder
+COLOR_TEXT_GOLD = "#c5a059"     # Der Eine Ring Gold
+COLOR_TEXT_DIM = "#8c7b70"      # Altpapier Grau
+COLOR_ACCENT_RED = "#5c1815"    # Dunkelrot
+COLOR_INPUT_BG = "#0f0a08"      # Fast Schwarz für Eingabefelder
 
-FONT_UI = ("Georgia", 11)       
-FONT_TITLE = ("Georgia", 22, "bold")
-FONT_BOLD = ("Georgia", 11, "bold")
+FONT_TITLE = ("Georgia", 20, "bold")
+FONT_UI = ("Georgia", 11)
+FONT_TEXT = ("Georgia", 12)
 FONT_MONO = ("Consolas", 10)
 
 class LotroApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("LOTRO Voice Companion 2.0")
+        self.root.title("Der Vorleser von Mittelerde")
+        self.root.geometry("900x700")
+        self.root.configure(bg=COLOR_BG_DARK)
         
-        # KORREKTUR: Fenstergröße stabilisieren
-        self.root.geometry("1000x800")
-        self.root.minsize(1000, 800) # Minimale Größe festlegen
-        self.root.resizable(True, True) # Größenänderung erlauben, um Layout-Konflikte zu vermeiden
-        self.root.configure(bg=COLOR_BG_MAIN)
-        
-        self.setup_styles()
-        
-        self.engine = CoreEngine() # INSTANZ DER NEUEN CORE ENGINE
+        # Icon laden (falls vorhanden)
+        if os.path.exists("app_icon.ico"):
+            self.root.iconbitmap("app_icon.ico")
+
+        self.engine = CoreEngine()
         self.running = False
         self.hotkey_hook = None
-        self.old_log_content = "" 
+        
+        # Hintergrundbild laden
+        self.bg_photo = None
+        self.setup_background()
 
-        main_pad_frame = ttk.Frame(root, padding="15 15 15 15")
-        main_pad_frame.pack(expand=True, fill="both")
+        # Styling
+        self.setup_styles()
 
-        self.notebook = ttk.Notebook(main_pad_frame)
-        self.notebook.pack(expand=True, fill="both")
+        # Haupt-Container (Canvas für Transparenz-Effekte wäre kompliziert, wir nutzen Frames)
+        # Wir nutzen ein Notebook (Tabs) aber stylen es dunkel
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill="both", padx=20, pady=20)
 
-        self.tab_main = self.create_tab_frame(self.notebook)
-        self.tab_settings = self.create_tab_frame(self.notebook)
+        self.tab_status = self.create_tab(self.notebook, "Das Auge (Status)")
+        self.tab_settings = self.create_tab(self.notebook, "Die Schriften (Einstellungen)")
 
-        self.notebook.add(self.tab_main, text="  Scannen & Status  ")
-        self.notebook.add(self.tab_settings, text="  Einstellungen  ")
-
-        self.setup_main_tab()
+        self.setup_status_tab()
         self.setup_settings_tab()
 
         self.load_settings_to_ui()
         self.register_hotkey()
-        self.update_log_preview()
+
+    def setup_background(self):
+        """Versucht background.png zu laden und als Hintergrund zu setzen."""
+        bg_path = "background.png"
+        if os.path.exists(bg_path):
+            try:
+                # Bild laden und auf Fenstergröße skalieren (initial)
+                image = Image.open(bg_path)
+                # Wir machen es etwas dunkler für bessere Lesbarkeit
+                image = image.point(lambda p: p * 0.5) 
+                self.bg_image_raw = image # Original behalten zum Resizen
+                
+                self.bg_label = tk.Label(self.root, bg=COLOR_BG_DARK)
+                self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+                
+                # Bind resize event
+                self.root.bind("<Configure>", self.resize_background)
+            except Exception as e:
+                print(f"Hintergrund konnte nicht geladen werden: {e}")
+
+    def resize_background(self, event):
+        if hasattr(self, 'bg_image_raw'):
+            new_width = event.width
+            new_height = event.height
+            if new_width > 0 and new_height > 0:
+                resized = self.bg_image_raw.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(resized)
+                self.bg_label.config(image=self.bg_photo)
 
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
         
-        style.configure("TNotebook", background=COLOR_BG_MAIN, borderwidth=0)
+        # Tabs Style
+        style.configure("TNotebook", background=COLOR_BG_DARK, borderwidth=0)
         style.configure("TNotebook.Tab", 
-                        background=COLOR_BTN_BG, 
-                        foreground=COLOR_TEXT_SILVER, 
-                        font=FONT_BOLD, 
-                        padding=[15, 5])
+                        background=COLOR_BG_PANEL, 
+                        foreground=COLOR_TEXT_DIM, 
+                        font=("Georgia", 10, "bold"),
+                        padding=[15, 8],
+                        borderwidth=0)
         style.map("TNotebook.Tab", 
-                  background=[("selected", COLOR_BG_FRAME)], 
+                  background=[("selected", COLOR_ACCENT_RED)], 
                   foreground=[("selected", COLOR_TEXT_GOLD)])
 
-        style.configure("TFrame", background=COLOR_BG_FRAME)
-        style.configure("TLabel", background=COLOR_BG_FRAME, foreground=COLOR_TEXT_SILVER, font=FONT_UI)
-        style.configure("Header.TLabel", foreground=COLOR_TEXT_GOLD, font=FONT_TITLE)
-        style.configure("LogHeader.TLabel", foreground=COLOR_TEXT_GOLD, font=FONT_BOLD)
-        style.configure("Check.TCheckbutton", background=COLOR_BG_FRAME, foreground=COLOR_TEXT_SILVER, font=FONT_UI)
+        # Frame Style
+        style.configure("TFrame", background=COLOR_BG_PANEL)
         
-        style.configure("Status.TLabel", 
-                        background=COLOR_ENTRY_BG, 
-                        foreground=COLOR_STATUS_READY, 
-                        font=("Georgia", 14, "bold"),
-                        padding=[10, 10], 
-                        anchor="center") 
+        # Label Style
+        style.configure("TLabel", background=COLOR_BG_PANEL, foreground=COLOR_TEXT_GOLD, font=FONT_UI)
+        style.configure("Header.TLabel", font=FONT_TITLE, foreground=COLOR_TEXT_GOLD)
+        
+        # Button Style (Goldener Rahmen simuliert durch Farben)
+        style.configure("TButton", 
+                        background=COLOR_BG_DARK, 
+                        foreground=COLOR_TEXT_GOLD, 
+                        font=("Georgia", 11, "bold"),
+                        borderwidth=2,
+                        focuscolor=COLOR_TEXT_GOLD)
+        style.map("TButton", 
+                  background=[('active', COLOR_ACCENT_RED)], 
+                  foreground=[('active', 'white')])
 
-    def create_tab_frame(self, parent):
-        frame = ttk.Frame(parent, padding="10 10 10 10")
-        frame.pack(fill="both", expand=True)
+    def create_tab(self, parent, title):
+        frame = ttk.Frame(parent, style="TFrame")
+        parent.add(frame, text=title)
         return frame
 
-    def create_lotro_button(self, parent, text, command, bg_color=COLOR_BTN_BG):
-        btn = tk.Button(parent, 
-                        text=text, 
-                        command=command,
-                        bg=bg_color,
-                        fg=COLOR_BTN_FG,
-                        font=FONT_BOLD,
-                        activebackground=COLOR_TEXT_GOLD,
-                        activeforeground=COLOR_BG_MAIN,
-                        relief="ridge",
-                        bd=3,
-                        padx=15,
-                        pady=8,
-                        cursor="hand2")
-        return btn
+    def create_gold_border_entry(self, parent, variable=None, show=None):
+        """Erstellt ein Eingabefeld mit 'goldenem' Look"""
+        entry = tk.Entry(parent, 
+                         bg=COLOR_INPUT_BG, 
+                         fg=COLOR_TEXT_GOLD, 
+                         insertbackground=COLOR_TEXT_GOLD, 
+                         font=FONT_MONO, 
+                         relief="flat", 
+                         bd=5,
+                         textvariable=variable)
+        if show: entry.config(show=show)
+        return entry
 
-    def setup_main_tab(self):
-        self.tab_main.grid_columnconfigure(0, weight=3)
-        self.tab_main.grid_columnconfigure(1, weight=1)
-        self.tab_main.grid_rowconfigure(0, weight=1)
+    # --- TAB 1: STATUS ---
+    def setup_status_tab(self):
+        # Layout: Oben Status-Text, Mitte Großes Textfeld, Unten Button
+        self.tab_status.grid_columnconfigure(0, weight=1)
+        self.tab_status.grid_rowconfigure(1, weight=1)
 
-        left_frame = ttk.Frame(self.tab_main, style="TFrame")
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=0)
-        left_frame.grid_rowconfigure(1, weight=1)
-        left_frame.grid_columnconfigure(0, weight=1)
-
-        ttk.Label(left_frame, text="Erkannter Quest-Text:", style="Header.TLabel").grid(row=0, column=0, sticky="w", pady=(5, 5), padx=15)
+        # Header
+        header_frame = ttk.Frame(self.tab_status, padding="10 20 10 10")
+        header_frame.grid(row=0, column=0, sticky="ew")
         
-        self.txt_preview = tk.Text(left_frame, height=35, bg=COLOR_ENTRY_BG, fg=COLOR_TEXT_SILVER, 
-                                   insertbackground="white", font=("Georgia", 13), relief="flat", padx=10, pady=10)
-        self.txt_preview.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        self.lbl_status = ttk.Label(header_frame, text="Das Auge ruht... (Warte auf Hotkey)", font=("Georgia", 14, "italic"))
+        self.lbl_status.pack()
+
+        # Text Area (Das Pergament)
+        text_frame = ttk.Frame(self.tab_status, padding="20 0 20 20")
+        text_frame.grid(row=1, column=0, sticky="nsew")
+        
+        self.txt_preview = tk.Text(text_frame, 
+                                   bg=COLOR_INPUT_BG, 
+                                   fg="#e0d5c1", # Helles Pergament-Weiß für Lesbarkeit
+                                   font=("Georgia", 14), 
+                                   wrap="word", 
+                                   relief="flat", 
+                                   padx=15, pady=15,
+                                   bd=0)
+        self.txt_preview.pack(expand=True, fill="both")
+        self.txt_preview.insert("1.0", "\n\n   Noch wurde kein Text aus den Schatten Mittelerdes entrissen...\n")
         self.txt_preview.config(state="disabled")
 
-        right_frame = ttk.Frame(self.tab_main, style="TFrame")
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0), pady=0)
-        right_frame.grid_rowconfigure(2, weight=1)
-        right_frame.grid_columnconfigure(0, weight=1)
-
-        control_frame = ttk.Frame(right_frame, style="TFrame")
-        control_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        # Manueller Button
+        btn_frame = ttk.Frame(self.tab_status, padding="0 0 0 20")
+        btn_frame.grid(row=2, column=0)
         
-        ttk.Label(control_frame, text="Status & Steuerung", foreground=COLOR_TEXT_GOLD, font=FONT_BOLD).pack(pady=(10, 5))
-        
-        self.lbl_status = ttk.Label(control_frame, text="Status: Bereit (Warte auf Taste...)", style="Status.TLabel") 
-        self.lbl_status.pack(fill="x", pady=10, padx=10)
+        self.btn_scan = tk.Button(btn_frame, 
+                                  text="Macht entfesseln (Scan)", 
+                                  command=self.run_once_manual,
+                                  bg=COLOR_ACCENT_RED,
+                                  fg=COLOR_TEXT_GOLD,
+                                  font=("Georgia", 12, "bold"),
+                                  relief="ridge",
+                                  bd=3,
+                                  padx=20, pady=8,
+                                  cursor="hand2",
+                                  activebackground=COLOR_TEXT_GOLD,
+                                  activeforeground="black")
+        self.btn_scan.pack()
 
-        self.btn_action = self.create_lotro_button(control_frame, "🔊 HOTKEY-Scan Auslösen", self.run_once_manual)
-        self.btn_action.pack(fill="x", pady=10, padx=10)
-        
-        self.lbl_hotkey = ttk.Label(control_frame, text=f"Hotkey: {self.engine.config.get('hotkey', 'ctrl+alt+s')}", 
-                                    foreground=COLOR_ACCENT)
-        self.lbl_hotkey.pack(pady=(5, 10))
-
-        ttk.Label(right_frame, text="System-Log Vorschau:", style="LogHeader.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 5), padx=10)
-        
-        self.log_widget = scrolledtext.ScrolledText(right_frame, state='disabled', height=18, bg=COLOR_ENTRY_BG, fg="#a0a0a0", font=FONT_MONO, relief="flat")
-        self.log_widget.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 15))
-
-
+    # --- TAB 2: EINSTELLUNGEN ---
     def setup_settings_tab(self):
-        canvas = tk.Canvas(self.tab_settings, bg=COLOR_BG_FRAME, highlightthickness=0)
+        # Ein Canvas für Scrolling, falls es auf kleinen Bildschirmen eng wird
+        canvas = tk.Canvas(self.tab_settings, bg=COLOR_BG_PANEL, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.tab_settings, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas, style="TFrame")
 
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(
-                scrollregion=canvas.bbox("all")
-            )
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=880) 
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=800)
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side="left", fill="both", expand=True) 
+        canvas.pack(side="left", fill="both", expand=True, padx=20, pady=20)
         scrollbar.pack(side="right", fill="y")
-        
-        def create_entry(parent_frame, label_text, show=None):
-            ttk.Label(parent_frame, text=label_text).pack(anchor="w", pady=(10, 2), padx=15)
-            entry = tk.Entry(parent_frame, bg=COLOR_ENTRY_BG, fg=COLOR_TEXT_SILVER, insertbackground="white", font=FONT_MONO, relief="flat", bd=5)
-            if show: entry.config(show=show)
-            entry.pack(fill="x", pady=2, ipady=3, padx=15)
-            return entry
-        
-        def create_text_field(parent_frame, label_text):
-            ttk.Label(parent_frame, text=label_text).pack(anchor="w", pady=(10, 2), padx=15)
-            text_field = tk.Text(parent_frame, height=3, bg=COLOR_ENTRY_BG, fg=COLOR_TEXT_SILVER, insertbackground="white", font=FONT_MONO, relief="flat", bd=5, padx=5, pady=5)
-            text_field.pack(fill="x", pady=2, padx=15)
-            return text_field
 
-        api_frame = tk.LabelFrame(scrollable_frame, text="ElevenLabs API & Audio Konfiguration", bg=COLOR_BG_FRAME, fg=COLOR_TEXT_GOLD, font=FONT_BOLD, padx=5, pady=5)
-        api_frame.pack(fill="x", pady=(10, 15), padx=5)
+        # --- SEKTION 1: DIE STIMME (API) ---
+        lbl_sec1 = ttk.Label(scrollable_frame, text="Die Stimme (ElevenLabs)", style="Header.TLabel")
+        lbl_sec1.pack(anchor="w", pady=(10, 10))
 
-        self.ent_api_key = create_entry(api_frame, "ElevenLabs API Key:", show="*")
-        
-        # KORREKTUR: Text der Verzögerung angepasst, da 0.0 Standard ist
-        self.ent_delay = create_entry(api_frame, "Zusätzliche Audio-Verzögerung (Sekunden, Standard: 0.0):")
-        
-        self.ent_hotkey = create_entry(api_frame, "Globaler Hotkey (z.B. ctrl+alt+s):")
-        
-        ocr_frame = tk.LabelFrame(scrollable_frame, text="OCR & Pfad Konfiguration", bg=COLOR_BG_FRAME, fg=COLOR_TEXT_GOLD, font=FONT_BOLD, padx=5, pady=5)
-        ocr_frame.pack(fill="x", pady=(15, 15), padx=5)
+        ttk.Label(scrollable_frame, text="Geheimer Schlüssel (API Key):").pack(anchor="w")
+        self.ent_api_key = self.create_gold_border_entry(scrollable_frame, show="*")
+        self.ent_api_key.pack(fill="x", pady=(0, 15))
 
-        self.ent_tesseract = create_entry(ocr_frame, "Pfad zu Tesseract.exe:")
-        self.ent_logpath = create_entry(ocr_frame, "Pfad zur LOTRO Script.log:")
-        
-        ttk.Label(ocr_frame, text="Monitor Auswahl:").pack(anchor="w", pady=(10, 2), padx=15)
-        self.cmb_monitor = ttk.Combobox(ocr_frame, values=["1", "2", "3", "4"], state="readonly", font=FONT_UI)
-        self.cmb_monitor.pack(fill="x", pady=2, ipady=3, padx=15)
-        self.cmb_monitor.set("1")
+        # --- SEKTION 2: DAS AUGE (OCR) ---
+        lbl_sec2 = ttk.Label(scrollable_frame, text="Das Auge (OCR Einstellungen)", style="Header.TLabel")
+        lbl_sec2.pack(anchor="w", pady=(10, 10))
 
-        ocr_advanced_frame = tk.LabelFrame(scrollable_frame, text="OCR Detail-Konfiguration (Nur für Experten)", bg=COLOR_BG_FRAME, fg=COLOR_TEXT_GOLD, font=FONT_BOLD, padx=5, pady=5)
-        ocr_advanced_frame.pack(fill="x", pady=(15, 15), padx=5)
+        ttk.Label(scrollable_frame, text="Pfad zu Tesseract (Die Seher-Linse):").pack(anchor="w")
+        self.ent_tesseract = self.create_gold_border_entry(scrollable_frame)
+        self.ent_tesseract.pack(fill="x", pady=(0, 10))
         
-        self.ent_ocr_lang = create_entry(ocr_advanced_frame, "Tesseract Sprachen (z.B. deu+eng):")
-        self.ent_ocr_psm = create_entry(ocr_advanced_frame, "Tesseract PSM Modus (Standard: 6):")
-        self.txt_ocr_whitelist = create_text_field(ocr_advanced_frame, "Tesseract Whitelist (Erlaubte Zeichenkette):")
+        # Einfacher Monitor-Wähler
+        frame_mon = ttk.Frame(scrollable_frame)
+        frame_mon.pack(fill="x", pady=5)
+        ttk.Label(frame_mon, text="Welchen Monitor beobachtet das Auge?").pack(side="left")
+        self.cmb_monitor = ttk.Combobox(frame_mon, values=["1", "2", "3", "4"], width=5, font=FONT_UI, state="readonly")
+        self.cmb_monitor.pack(side="left", padx=10)
+        
+        # --- SEKTION 3: MAGIE (Steuerung) ---
+        lbl_sec3 = ttk.Label(scrollable_frame, text="Magie (Steuerung)", style="Header.TLabel")
+        lbl_sec3.pack(anchor="w", pady=(20, 10))
 
+        ttk.Label(scrollable_frame, text="Zauberspruch (Hotkey, z.B. ctrl+alt+s):").pack(anchor="w")
+        self.ent_hotkey = self.create_gold_border_entry(scrollable_frame)
+        self.ent_hotkey.pack(fill="x", pady=(0, 10))
+
+        # Checkbox für Debug
         self.var_debug = tk.BooleanVar()
-        ttk.Checkbutton(scrollable_frame, text="Debug-Bilder (Screenshots/Verarbeitung) speichern", 
-                        variable=self.var_debug, style="Check.TCheckbutton").pack(anchor="w", pady=15, padx=15)
-        
-        self.create_lotro_button(scrollable_frame, "💾 Einstellungen Speichern & Stimmen aktualisieren", self.save_settings).pack(pady=(10, 30), fill="x", padx=5)
+        chk = tk.Checkbutton(scrollable_frame, 
+                             text="Visionen aufzeichnen (Debug Bilder speichern)", 
+                             variable=self.var_debug,
+                             bg=COLOR_BG_PANEL, 
+                             fg=COLOR_TEXT_DIM,
+                             selectcolor=COLOR_BG_DARK,
+                             activebackground=COLOR_BG_PANEL,
+                             activeforeground=COLOR_TEXT_GOLD,
+                             font=FONT_UI)
+        chk.pack(anchor="w", pady=10)
 
+        # SPEICHERN BUTTON
+        self.btn_save = tk.Button(scrollable_frame, 
+                                  text="In Stein meißeln (Speichern)", 
+                                  command=self.save_settings,
+                                  bg=COLOR_TEXT_GOLD,
+                                  fg="black",
+                                  font=("Georgia", 12, "bold"),
+                                  relief="raised",
+                                  bd=3,
+                                  padx=20, pady=10,
+                                  cursor="hand2")
+        self.btn_save.pack(pady=30, fill="x")
 
-    # --- FUNKTIONEN ---
-    
-    def log(self, msg):
-        log_message(msg)
-    
-    def update_log_preview(self):
-        try:
-            with open("app.log", "r", encoding="utf-8") as f:
-                current_content = f.read()
-            
-            if current_content != self.old_log_content:
-                self.log_widget.config(state='normal')
-                lines = current_content.split('\n')
-                display_content = '\n'.join(lines[-50:])
-                
-                self.log_widget.delete(1.0, tk.END)
-                self.log_widget.insert(tk.END, display_content)
-                self.log_widget.see(tk.END)
-                self.log_widget.config(state='disabled')
-                self.old_log_content = current_content
-                
-        except FileNotFoundError:
-            pass 
-        except Exception as e:
-            self.log_widget.config(state='normal')
-            self.log_widget.insert(tk.END, f"\nFehler beim Lesen der Log-Datei: {e}")
-            self.log_widget.config(state='disabled')
-
-        self.root.after(1000, self.update_log_preview)
-
-
+    # --- LOGIK ---
     def load_settings_to_ui(self):
         cfg = self.engine.config
-        
-        fields = [self.ent_api_key, self.ent_tesseract, self.ent_logpath, self.ent_hotkey, self.ent_delay, self.ent_ocr_lang, self.ent_ocr_psm]
-        for field in fields:
-            field.delete(0, tk.END)
-        self.txt_ocr_whitelist.delete(1.0, tk.END)
-
         self.ent_api_key.insert(0, cfg.get("api_key", ""))
         self.ent_tesseract.insert(0, cfg.get("tesseract_path", ""))
-        self.ent_logpath.insert(0, cfg.get("lotro_log_path", ""))
         self.ent_hotkey.insert(0, cfg.get("hotkey", "ctrl+alt+s"))
-        
-        # KORREKTUR: Standardwert für Verzögerung auf 0.0 setzen
-        self.ent_delay.insert(0, str(cfg.get("audio_delay", 0.0)))
-        
         self.cmb_monitor.set(str(cfg.get("monitor_index", 1)))
         self.var_debug.set(cfg.get("debug_mode", False))
-        
-        self.ent_ocr_lang.insert(0, cfg.get("ocr_language", "deu+eng"))
-        self.ent_ocr_psm.insert(0, str(cfg.get("ocr_psm", 6)))
-        self.txt_ocr_whitelist.insert(1.0, cfg.get("ocr_whitelist", 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzäöüÄÖÜß0123456789.,?!:;\'"()[]-/'))
-        
-        self.lbl_hotkey.config(text=f"Hotkey: {cfg.get('hotkey', 'ctrl+alt+s')}")
 
     def save_settings(self):
         cfg = self.engine.config
-        
         cfg["api_key"] = self.ent_api_key.get().strip()
         cfg["tesseract_path"] = self.ent_tesseract.get().strip()
-        cfg["lotro_log_path"] = self.ent_logpath.get().strip()
         cfg["hotkey"] = self.ent_hotkey.get().strip()
-        cfg["ocr_language"] = self.ent_ocr_lang.get().strip()
-        cfg["ocr_whitelist"] = self.txt_ocr_whitelist.get(1.0, tk.END).strip()
-
+        
         try:
-            cfg["audio_delay"] = float(self.ent_delay.get().strip())
             cfg["monitor_index"] = int(self.cmb_monitor.get())
             cfg["debug_mode"] = self.var_debug.get()
-            cfg["ocr_psm"] = int(self.ent_ocr_psm.get().strip())
-        except ValueError:
-            messagebox.showerror("Fehler", "Zahlenformat (Verzögerung/Monitor/PSM) ist falsch.")
-            return
+        except: pass
 
         save_config(cfg)
         self.engine.config = cfg
-        # Konfigurationen in den Services aktualisieren
+        # Services neu laden
         self.engine.ocr_extractor.config = cfg
         self.engine.ocr_extractor.pytesseract.pytesseract.tesseract_cmd = cfg["tesseract_path"]
         self.engine.tts_service.config = cfg
         
         self.register_hotkey()
-        
         threading.Thread(target=self.engine.fetch_voices).start() 
-        messagebox.showinfo("Gespeichert", "Einstellungen wurden übernommen und Stimmen werden aktualisiert.")
+        messagebox.showinfo("Erfolg", "Die Schriften wurden aktualisiert.")
 
     def register_hotkey(self):
         hk = self.engine.config.get("hotkey", "ctrl+alt+s")
@@ -313,44 +292,41 @@ class LotroApp:
             except: pass
         try:
             self.hotkey_hook = keyboard.add_hotkey(hk, lambda: self.root.after(0, self.run_once_manual))
-            self.log(f"Hotkey aktiviert ({hk})")
-        except: self.log(f"Hotkey Fehler: Konnte '{hk}' nicht registrieren.")
+            self.lbl_status.config(text=f"Das Auge wacht auf Zeichen: {hk}")
+        except:
+            self.lbl_status.config(text=f"Warnung: Zauberspruch '{hk}' konnte nicht gewirkt werden.")
 
     def run_once_manual(self):
-        """ Scannt und liest vor (Einmalig) """
-        self.lbl_status.config(text="Status: Scanne...", style="Status.TLabel", foreground=COLOR_STATUS_SCAN) 
-        self.log("Manuelle Scan-Anforderung erhalten.")
+        self.lbl_status.config(text="Das Auge sieht...", foreground=COLOR_TEXT_GOLD)
+        self.btn_scan.config(state="disabled", bg="#333333")
         threading.Thread(target=self.process_pipeline, daemon=True).start()
 
     def process_pipeline(self):
-        """ Führt die Pipeline (OCR -> TTS) im Hintergrund aus. """
         try:
-            # Führt die gesamte Pipeline aus
             txt = self.engine.run_pipeline()
-            
             if not txt or len(txt) < 5:
-                self.log("Kein Text gefunden (OCR-Ergebnis zu kurz oder leer).")
-                self.root.after(0, lambda: self.lbl_status.config(text="Status: Kein Text gefunden", style="Status.TLabel", foreground=COLOR_ACCENT)) 
-                self.root.after(0, lambda: self.update_text_preview("--- Kein verwertbarer Dialogtext gefunden ---"))
+                self.root.after(0, lambda: self.update_status("Keine Schrift erkannt.", error=True))
                 return
             
-            self.log(f"Erkannt: {txt[:70]}{'...' if len(txt) > 70 else ''}")
-            self.root.after(0, lambda: self.update_text_preview(txt))
-            self.root.after(0, lambda: self.lbl_status.config(text="Status: Fertig (Bereit)", style="Status.TLabel", foreground=COLOR_STATUS_READY))
+            self.root.after(0, lambda: self.update_ui_text(txt))
+            self.root.after(0, lambda: self.update_status("Die Stimme spricht...", done=True))
             
         except Exception as e:
-            self.log(f"FEHLER in der Pipeline: {e}")
-            self.root.after(0, lambda: self.lbl_status.config(text="Status: FEHLER", style="Status.TLabel", foreground=COLOR_ACCENT))
+            self.root.after(0, lambda: self.update_status(f"Dunkle Magie (Fehler): {str(e)}", error=True))
+        finally:
+            self.root.after(2000, lambda: self.btn_scan.config(state="normal", bg=COLOR_ACCENT_RED))
 
-    def update_text_preview(self, txt):
-        """ Aktualisiert das Text-Widget (muss im Haupt-Thread laufen) """
+    def update_ui_text(self, txt):
         self.txt_preview.config(state="normal")
         self.txt_preview.delete(1.0, tk.END)
         self.txt_preview.insert(tk.END, txt)
         self.txt_preview.config(state="disabled")
 
+    def update_status(self, text, error=False, done=False):
+        color = COLOR_ACCENT_RED if error else (COLOR_TEXT_GOLD if not done else "#4caf50")
+        self.lbl_status.config(text=text, foreground=color)
+
 if __name__ == "__main__":
-    # Stelle sicher, dass die Konfigurationsdatei existiert, bevor die App startet
     from utils import load_config
     load_config() 
     root = tk.Tk()
