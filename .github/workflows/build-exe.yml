@@ -15,21 +15,19 @@ jobs:
     - name: 1. Code auschecken
       uses: actions/checkout@v4
 
-    - name: 2. Python 3.x einrichten
+    - name: 2. Python 3.11 einrichten (Stabile Version)
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x'
+        python-version: '3.11' # Jetzt auf stabile Version 3.11 gesetzt
         cache: 'pip'
 
     - name: 3. Abhängigkeiten und PyInstaller installieren
-      # Stellt sicher, dass alle Pakete (einschließlich opencv-python) installiert werden.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: 4. EXE-Datei mit PyInstaller erstellen (ALLE HIDDEN IMPORTS)
       run: |
-        # Fügt keyboard, pytesseract und cv2 explizit hinzu, um Modul-Fehler zu vermeiden.
         pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract --hidden-import=cv2 main.py
       working-directory: .
 
