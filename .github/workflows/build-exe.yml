@@ -22,15 +22,23 @@ jobs:
         cache: 'pip'
 
     - name: 3. Abhängigkeiten und PyInstaller installieren
-      # Stellt sicher, dass alle Pakete (einschließlich pygame) installiert werden.
+      # Stellt sicher, dass alle Pakete installiert werden.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: 4. EXE-Datei mit PyInstaller erstellen (FINALE KORREKTUR)
       run: |
-        # Fügt alle Module (keyboard, pytesseract, cv2, mss, pygame) explizit hinzu.
-        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract --hidden-import=cv2 --hidden-import=mss --hidden-import=pygame main.py
+        # Fügt ALLE erkannten Hidden Imports hinzu:
+        pyinstaller --onefile --name "Lotro-Speach" \
+        --hidden-import=keyboard \
+        --hidden-import=pytesseract \
+        --hidden-import=cv2 \
+        --hidden-import=mss \
+        --hidden-import=pygame \
+        --hidden-import=numpy \
+        --hidden-import=difflib \
+        main.py
       working-directory: .
 
     - name: 5. Artefakt hochladen
