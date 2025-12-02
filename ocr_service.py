@@ -10,7 +10,7 @@ class OCRExtractor:
     def __init__(self, config):
         self.config = config
         
-        # Tesseract Initialisierung
+        # Tesseract Pfad setzen
         tess_path = self.config.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
         pytesseract.pytesseract.tesseract_cmd = tess_path
         
@@ -55,7 +55,6 @@ class OCRExtractor:
                 monitor = sct.monitors[mon_idx]
                 sct_img = sct.grab(monitor)
                 img = np.array(sct_img)
-                # MSS gibt BGRA zurück, wir brauchen BGR
                 img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 return img
         except Exception as e:
@@ -64,35 +63,29 @@ class OCRExtractor:
 
     def isolate_text_colors(self, img):
         """
-        Filtert Gelb (Gold), Weiß, Silber und Grau heraus und erstellt
-        ein Bild mit schwarzem Text auf weißem Hintergrund.
+        Filtert Farben und invertiert das Bild (Schwarz auf Weiß).
         """
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        # 1. Gelb / Gold (für Quest Namen)
+        # 1. Gelb / Gold
         lower_yellow = np.array([15, 70, 70])
         upper_yellow = np.array([35, 255, 255])
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        # 2. Weiß / Silber / Hellgrau (für Dialog Text)
+        # 2. Weiß / Silber / Hellgrau
         lower_white = np.array([0, 0, 140])      
         upper_white = np.array([180, 50, 255])   
         mask_white = cv2.inRange(hsv, lower_white, upper_white)
 
-        # Kombinieren und Invertieren (Schwarz auf Weiß)
         combined_mask = cv2.bitwise_or(mask_yellow, mask_white)
         final_image = cv2.bitwise_not(combined_mask)
 
         return final_image
 
     def find_text_region(self, img):
-        """
-        Versucht den Bereich per Template zu finden.
-        Gibt zurück: (cropped_img, coordinates_tuple) ODER (None, None) wenn nichts gefunden.
-        """
+        """Findet den Bereich per Template."""
         h_img, w_img = img.shape[:2]
 
-        # Wenn keine Templates geladen wurden -> Sofortiger Abbruch
         if self.templates is None:
             return None, None
 
@@ -100,7 +93,6 @@ class OCRExtractor:
         found_positions = {}
         threshold = 0.80
 
-        # Template Matching
         for key, template_img in self.templates.items():
             res = cv2.matchTemplate(gray_screenshot, template_img, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
@@ -108,25 +100,22 @@ class OCRExtractor:
             if max_val >= threshold:
                 found_positions[key] = max_loc 
             else:
-                # Sobald ein Template fehlt -> Abbruch (Kein Fallback mehr!)
                 return None, None
 
         if len(found_positions) < 4:
             return None, None
 
-        # Koordinaten aus Templates berechnen
         try:
-            final_x1 = min(found_positions["top_left"][0], found_positions["bottom_left"][0])
-            final_y1 = min(found_positions["top_left"][1], found_positions["top_right"][1])
-            
             h_tr, w_tr = self.templates["top_right"].shape
             h_br, w_br = self.templates["bottom_right"].shape
             h_bl, w_bl = self.templates["bottom_left"].shape
-            
+
+            final_x1 = min(found_positions["top_left"][0], found_positions["bottom_left"][0])
+            final_y1 = min(found_positions["top_left"][1], found_positions["top_right"][1])
             final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
             final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
             
-            padding = -5
+            padding = 10
             final_x1 = max(0, final_x1 - padding)
             final_y1 = max(0, final_y1 - padding)
             final_x2 = min(w_img, final_x2 + padding)
@@ -140,7 +129,7 @@ class OCRExtractor:
             if w_final < 50 or h_final < 50:
                 return None, None
             
-            log_message(f"Templates gefunden. Bereich: x={final_x1}, y={final_y1}, w={w_final}, h={h_final}")
+            log_message(f"Templates gefunden. Bereich: {w_final}x{h_final}")
             return dialog_region, (final_x1, final_y1, w_final, h_final)
             
         except Exception as e:
@@ -148,58 +137,66 @@ class OCRExtractor:
             return None, None
 
     def run_ocr(self):
-        """Hauptfunktion, die von core.py aufgerufen wird."""
-        
-        # 1. Screenshot holen
         img = self.get_monitor_screenshot()
-        if img is None: 
-            return "Kein Text gefunden"
+        if img is None: return "Kein Text gefunden"
 
-        # 2. Textbereich finden (Nur via Templates!)
         cropped_img, coords = self.find_text_region(img)
         
-        # WENN KEIN BEREICH GEFUNDEN WURDE:
         if cropped_img is None:
-            log_message("Kein Dialog-Template erkannt. Gebe 'Kein Text gefunden' zurück.")
-            # Dieser String wird von core.py als gültiger Text erkannt (> 5 Zeichen)
-            # und dann an die TTS gesendet.
+            log_message("Kein Dialog-Template erkannt.")
             return "Kein Text gefunden"
 
-        (x, y, w, h) = coords
-
-        # 3. DEBUG: Gesamtbild mit Rahmen
+        # --- DEBUG BILD 1: Ausschnitt ---
         if self.config.get("debug_mode", False):
             try:
-                debug_full = img.copy()
-                cv2.rectangle(debug_full, (x, y), (x + w, y + h), (0, 255, 0), 3)
-                debug_path_view = os.path.join(os.getcwd(), "debug_detection_view.png")
-                cv2.imwrite(debug_path_view, debug_full)
-            except Exception: pass
+                cv2.imwrite("debug_detection_view.png", cropped_img)
+            except: pass
 
-        # 4. Bildverarbeitung (Farben filtern)
+        # Bildverarbeitung (Farben filtern)
         processed_img = self.isolate_text_colors(cropped_img)
 
-        # 5. DEBUG: Input für OCR
+        # === NEU: UPSCALING FÜR BESSERE UMLAUTE ===
+        # Vergrößert das Bild um Faktor 2.5 mit kubischer Interpolation.
+        # Das hilft Tesseract extrem bei Punkten auf i, ö, ä, ü.
+        processed_img = cv2.resize(processed_img, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+        
+        # Optional: Leichtes Weichzeichnen nach Upscale entfernt Pixel-Artefakte
+        # processed_img = cv2.GaussianBlur(processed_img, (3, 3), 0)
+
+        # --- DEBUG BILD 2: OCR Input (Vergrößert) ---
         if self.config.get("debug_mode", False):
             try:
-                debug_path_input = os.path.join(os.getcwd(), "debug_ocr_input.png")
-                cv2.imwrite(debug_path_input, processed_img)
-            except Exception: pass
+                cv2.imwrite("debug_ocr_input.png", processed_img)
+            except: pass
 
-        # 6. Tesseract ausführen
-        custom_config = f'--psm {self.config.get("ocr_psm", 6)}'
+        # Tesseract Config
+        psm = self.config.get("ocr_psm", 6)
+        # Stelle sicher, dass "deu" genutzt wird für Umlaute!
+        lang = self.config.get("ocr_language", "deu+eng") 
         whitelist = self.config.get("ocr_whitelist", "")
+        
+        custom_config = f'--psm {psm}'
+        
+        # Whitelist ist gefährlich für Umlaute, wenn man sie in der Config falsch eingibt.
+        # Wenn Umlaute fehlen, lösche den Inhalt der Whitelist in den Einstellungen!
         if whitelist and len(whitelist) > 5:
             custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
             
         try:
-            txt = pytesseract.image_to_string(processed_img, lang=self.config.get("ocr_language", "deu+eng"), config=custom_config)
+            txt = pytesseract.image_to_string(processed_img, lang=lang, config=custom_config)
             result = txt.strip()
             
-            # Falls Tesseract trotz Bild nichts findet
-            if not result:
-                return "Kein Text gefunden"
-                
+            # === NEU: DEBUG TEXT DATEI ===
+            if self.config.get("debug_mode", False):
+                try:
+                    with open("debug_ocr_text.txt", "w", encoding="utf-8") as f:
+                        f.write(f"--- OCR ROHDATEN ---\nConfig: {custom_config}\nSprache: {lang}\n\nErgebnis:\n{result}")
+                        log_message("Debug-Text in 'debug_ocr_text.txt' gespeichert.")
+                except Exception as e:
+                    log_message(f"Konnte Debug-Text nicht speichern: {e}")
+            # ==============================
+
+            if not result: return "Kein Text gefunden"
             return result
         except Exception as e:
             log_message(f"OCR Fehler: {e}")
