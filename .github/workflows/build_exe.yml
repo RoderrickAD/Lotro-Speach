@@ -1,8 +1,7 @@
-name: 🔨 Build Windows Executable (Dynamic)
+name: 🔨 Build Windows Executable (Final Fix)
 
 on:
   workflow_dispatch:
-    # Wir brauchen keine manuellen Inputs mehr, das Skript macht alles automatisch.
 
 env:
   PYTHON_VERSION: '3.11'
@@ -25,49 +24,67 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: 📦 PyInstaller-Build (Automatisch & Dynamisch)
-      id: build
+    - name: 🛠️ Build-Skript (Absolute Pfade)
       run: |
-        Write-Host "🔍 Suche nach Python-Modulen im aktuellen Ordner..."
+        $scriptContent = @"
+        import PyInstaller.__main__
+        import os
+        import sys
+
+        # 1. Den absoluten Pfad zum Arbeitsverzeichnis ermitteln
+        # Das verhindert, dass PyInstaller Dateien "übersieht"
+        work_dir = os.path.abspath(os.getcwd())
+        print(f'--- ARBEITSVERZEICHNIS: {work_dir} ---')
+
+        # 2. Alle deine Python-Module finden (automatisches Hidden-Import)
+        hidden_imports = []
+        files_found = []
         
-        # 1. Alle .py Dateien finden (außer main.py, das ist der Startpunkt)
-        $pyFiles = Get-ChildItem -Filter "*.py" | Where-Object { $_.Name -ne "main.py" }
+        for f in os.listdir(work_dir):
+            if f.endswith('.py') and f != 'main.py' and f != 'builder.py':
+                name = f[:-3] # .py Endung entfernen
+                hidden_imports.append(f'--hidden-import={name}')
+                files_found.append(name)
         
-        # 2. String für Hidden Imports zusammenbauen
-        $hiddenImports = ""
-        foreach ($file in $pyFiles) {
-            $name = $file.BaseName
-            Write-Host "   -> Gefunden: $name"
-            $hiddenImports += " --hidden-import=$name"
-        }
+        print(f'Gefundene Module für Import: {files_found}')
+
+        # 3. Icon Einbindung (mit absolutem Pfad)
+        icon_args = []
+        icon_path = os.path.join(work_dir, 'app_icon.ico')
+        if os.path.exists(icon_path):
+            print(f'ICON GEFUNDEN: {icon_path}')
+            icon_args = [f'--icon={icon_path}']
+        else:
+            print('WARNUNG: app_icon.ico nicht gefunden! Standard-Icon wird genutzt.')
+
+        # 4. Der PyInstaller Befehl
+        # --paths={work_dir} ist der wichtigste Teil gegen den Import-Fehler!
+        args = [
+            os.path.join(work_dir, 'main.py'),
+            '--onefile',
+            '--name=LOTRO_Voice_Companion',
+            f'--paths={work_dir}',           # Zwingt PyInstaller, hier zu suchen
+            '--collect-all=pygame',
+            '--clean',
+            '--noconfirm',
+            '--windowed'                     # --windowed = Kein schwarzes Konsolenfenster
+        ] + hidden_imports + icon_args
+
+        print('--- STARTE PYINSTALLER ---')
+        PyInstaller.__main__.run(args)
+        "@
         
-        # 3. Der finale Befehl
-        # --paths=.           : WICHTIG! Zwingt PyInstaller, im aktuellen Ordner zu suchen
-        # --onefile           : Eine einzige EXE
-        # --noconsole         : (Optional) Konsole ausblenden. Entferne dies, wenn du das schwarze Fenster sehen willst.
-        # --collect-all pygame: Wichtig für Audio
-        # --icon=app_icon.ico : Dein Ring-Icon
-        
-        $build_command = "pyinstaller main.py --onefile --paths=. $hiddenImports --collect-all pygame --icon=app_icon.ico"
-        
-        Write-Host "🚀 Starte Build mit Befehl:"
-        Write-Host $build_command
-        
-        # Ausführen
-        Invoke-Expression $build_command
-        
-        # Output-Variable setzen
-        echo "EXE_NAME=main.exe" >> $env:GITHUB_OUTPUT
+        # Skript speichern und ausführen
+        $scriptContent | Out-File -FilePath builder.py -Encoding utf8
+        python builder.py
       shell: pwsh
 
-    - name: 📂 Umbenennen der ausführbaren Datei
+    - name: 📂 Prüfen und Umbenennen
       run: |
-        # Prüfen, ob die Datei existiert, bevor wir sie umbenennen
-        if (Test-Path "dist/main.exe") {
-            Move-Item "dist/main.exe" "dist/LOTRO_Voice_Companion.exe"
-            Write-Host "Datei erfolgreich umbenannt."
+        if (Test-Path "dist/LOTRO_Voice_Companion.exe") {
+            Write-Host "Build erfolgreich! Datei gefunden."
         } else {
-            Write-Error "Build fehlgeschlagen: dist/main.exe wurde nicht gefunden."
+            Write-Error "FEHLER: EXE wurde nicht erstellt."
             exit 1
         }
       shell: pwsh
