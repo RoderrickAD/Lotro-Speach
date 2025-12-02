@@ -7,7 +7,7 @@ on:
         description: 'Zusätzliche PyInstaller-Flags'
         required: false
         # Hier sind jetzt alle --hidden-import Flags enthalten:
-        default: '--onefile --collect-all pygame --hidden-import=ocr_service --hidden-import=tts_service --hidden-import=utils --hidden-import=core'
+        default: '--onefile --icon=app_icon.ico --collect-all pygame --hidden-import=ocr_service --hidden-import=tts_service --hidden-import=utils --hidden-import=core'
 
 env:
   PYTHON_VERSION: '3.11'
