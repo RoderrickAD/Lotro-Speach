@@ -30,15 +30,7 @@ jobs:
     - name: 4. EXE-Datei mit PyInstaller erstellen (FINALE KORREKTUR)
       run: |
         # Fügt ALLE erkannten Hidden Imports hinzu:
-        pyinstaller --onefile --name "Lotro-Speach" \
-        --hidden-import=keyboard \
-        --hidden-import=pytesseract \
-        --hidden-import=cv2 \
-        --hidden-import=mss \
-        --hidden-import=pygame \
-        --hidden-import=numpy \
-        --hidden-import=difflib \
-        main.py
+        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract --hidden-import=cv2 --hidden-import=mss --hidden-import=pygame --hidden-import=numpy --hidden-import=difflib main.py
       working-directory: .
 
     - name: 5. Artefakt hochladen
