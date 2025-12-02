@@ -1,15 +1,14 @@
 name: 🔨 Build Windows Executable (pyinstaller)
 
 on:
-  # Erlaubt die manuelle Ausführung über die GitHub Actions UI
   workflow_dispatch:
     inputs:
-pyinstaller_flags:
+      pyinstaller_flags:
         description: 'Zusätzliche PyInstaller-Flags'
         required: false
-        # ÄNDERUNG HIER: Wir fügen --hidden-import für alle deine Module hinzu
-        default: '--onefile --hidden-import=ocr_service --hidden-import=tts_service --hidden-import=utils --hidden-import=core --collect-all pygame --add-data "templates;templates"'
-        
+        # Hier sind jetzt alle --hidden-import Flags enthalten:
+        default: '--onefile --hidden-import=ocr_service --hidden-import=tts_service --hidden-import=utils --hidden-import=core --collect-all pygame --add-data "templates;templates" --add-data "config.json;." --add-data "voice_mapping.json;."'
+
 env:
   PYTHON_VERSION: '3.11'
 
@@ -26,21 +25,20 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
-    - name: ⚙️ Systemabhängigkeiten installieren (PyInstaller)
+    - name: ⚙️ Systemabhängigkeiten installieren
       run: |
         pip install pyinstaller
         pip install -r requirements.txt
-      # Anmerkung: Die `requirements.txt` muss alle Projektabhängigkeiten enthalten.
 
     - name: 📦 PyInstaller-Build ausführen
       id: build
       run: |
-        # Wir bauen `main.py`
+        # Der Befehl holt sich die Flags von oben (inputs)
         $build_command = "pyinstaller main.py ${{ github.event.inputs.pyinstaller_flags }}"
         Write-Host "Führe aus: $build_command"
         Invoke-Expression $build_command
         
-        # Windows-Name für die EXE-Datei extrahieren
+        # Name der Exe ermitteln (Fallback auf main.exe)
         $exe_name = "main.exe"
         if ($build_command -like "*--name*") {
           $match = $build_command | Select-String -Pattern "--name\s+([\w-]+)"
@@ -53,7 +51,6 @@ jobs:
 
     - name: 📂 Umbenennen der ausführbaren Datei
       run: |
-        # Der Output-Ordner ist 'dist'
         Move-Item "dist/${{ steps.build.outputs.EXE_NAME }}" "dist/LOTRO_Voice_Companion.exe"
       shell: pwsh
 
@@ -62,4 +59,3 @@ jobs:
       with:
         name: LOTRO-Voice-Companion-Windows-EXE
         path: dist/LOTRO_Voice_Companion.exe
-        # Anmerkung: PyInstaller erstellt den 'dist'-Ordner
