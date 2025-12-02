@@ -1,0 +1,141 @@
+name: 🔨 Build Windows EXE (Single File Merge Strategy)
+
+on:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build_windows_exe:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Repository auschecken
+      uses: actions/checkout@v4
+
+    - name: 🐍 Python Setup (Version ${{ env.PYTHON_VERSION }})
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: ⚙️ Systemabhängigkeiten installieren
+      run: |
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: 🧬 Python-Skripte verschmelzen (Merger)
+      run: |
+        $mergerScript = @"
+        import os
+
+        # 1. Die Reihenfolge ist extrem wichtig! 
+        # utils muss zuerst kommen, da andere darauf zugreifen.
+        # main muss als letztes kommen, da es die App startet.
+        file_order = ['utils.py', 'ocr_service.py', 'tts_service.py', 'core.py', 'main.py']
+        
+        # Diese Importe müssen wir aus den Dateien entfernen, da jetzt alles in einer Datei ist.
+        local_imports_to_remove = [
+            'from utils', 'import utils',
+            'from ocr_service', 'import ocr_service',
+            'from tts_service', 'import tts_service',
+            'from core', 'import core'
+        ]
+
+        combined_code = []
+        combined_code.append("# --- AUTO-GENERATED COMBINED FILE ---\n")
+        combined_code.append("import sys\nimport os\n") 
+
+        print("Starte Verschmelzung...")
+
+        for fname in file_order:
+            if os.path.exists(fname):
+                print(f" -> Verarbeite {fname}")
+                with open(fname, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                combined_code.append(f"\n# ================= {fname} =================\n")
+                
+                for line in lines:
+                    # Prüfen, ob die Zeile ein lokaler Import ist, den wir löschen müssen
+                    should_skip = False
+                    stripped = line.strip()
+                    
+                    # Wir behalten Zeilen, die NICHT mit lokalen Importen beginnen
+                    for imp in local_imports_to_remove:
+                        if stripped.startswith(imp):
+                            should_skip = True
+                            # Sonderfall: "from utils import log_message" -> muss weg
+                            break
+                    
+                    if should_skip:
+                        combined_code.append(f"# [MERGER] REMOVED: {line}")
+                    else:
+                        combined_code.append(line)
+            else:
+                print(f"FEHLER: Datei {fname} nicht gefunden!")
+                exit(1)
+
+        # Das Ergebnis speichern
+        with open('combined_app.py', 'w', encoding='utf-8') as f:
+            f.writelines(combined_code)
+            
+        print("Erfolg! 'combined_app.py' wurde erstellt.")
+        "@
+
+        $mergerScript | Out-File -FilePath merger.py -Encoding utf8
+        python merger.py
+      shell: pwsh
+
+    - name: 📦 EXE bauen (aus combined_app.py)
+      run: |
+        $buildScript = @"
+        import PyInstaller.__main__
+        import os
+        
+        work_dir = os.getcwd()
+        safe_work_dir = work_dir.replace('\\', '/')
+        
+        # Icon prüfen
+        icon_path_raw = os.path.join(work_dir, 'app_icon.ico')
+        if os.path.exists(icon_path_raw):
+            safe_icon_path = icon_path_raw.replace('\\', '/')
+            icon_arg = ['--icon', safe_icon_path]
+        else:
+            icon_arg = []
+
+        # PyInstaller Befehl auf die NEUE, kombinierte Datei
+        args = [
+            'combined_app.py',             # Wir bauen nur diese eine Datei!
+            '--onefile',
+            '--name=LOTRO_Voice_Companion',
+            f'--paths={safe_work_dir}',
+            '--collect-all=pygame',        # Wichtig für Audio
+            '--clean',
+            '--noconfirm',
+            '--windowed'
+        ] + icon_arg
+        
+        print("Starte PyInstaller auf combined_app.py...")
+        PyInstaller.__main__.run(args)
+        "@
+        
+        $buildScript | Out-File -FilePath builder.py -Encoding utf8
+        python builder.py
+      shell: pwsh
+
+    - name: 📂 Prüfen und Umbenennen
+      run: |
+        if (Test-Path "dist/LOTRO_Voice_Companion.exe") {
+            Write-Host "Build erfolgreich!"
+        } else {
+            Write-Error "FEHLER: EXE wurde nicht erstellt."
+            exit 1
+        }
+      shell: pwsh
+
+    - name: 📤 Artefakt hochladen
+      uses: actions/upload-artifact@v4
+      with:
+        name: LOTRO-Voice-Companion-Windows-EXE
+        path: dist/LOTRO_Voice_Companion.exe
