@@ -2,6 +2,10 @@ name: Build Lotro-Speach EXE (Manuelle Ausführung)
 
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Grund für die manuelle Erstellung (optional)'
+        required: false
   
 jobs:
   build_windows_exe:
