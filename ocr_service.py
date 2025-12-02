@@ -153,7 +153,7 @@ class OCRExtractor:
         
         log_message(f"Dialograhmen mittels Template Matching gefunden: ({final_x1}, {final_y1}) bis ({final_x2}, {final_y2})")
 
-        # KORRIGIERTE BILDVERARBEITUNG FÜR OPTIMIERTE OCR (SCHWARZ AUF WEISS)
+        # KORRIGIERTE BILDVERARBEITUNG FÜR OPTIMIERTE OCR 
         final_image_gray = cv2.cvtColor(dialog_region, cv2.COLOR_BGR2GRAY)
         
         # 1. Kontrastverbesserung (CLAHE)
@@ -163,15 +163,12 @@ class OCRExtractor:
         # 2. Stärkere Rauschunterdrückung
         denoised = cv2.medianBlur(contrasted, 3) 
         
-        # 3. Adaptive Binarisierung: Ideal für kontrastarme, texturierte Hintergründe.
-        optimized_img = cv2.adaptiveThreshold(denoised, 255, 
-                                              cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                              cv2.THRESH_BINARY, 
-                                              15, 
-                                              2) 
+        # 3. STATT AGGRESSIVER BINARISIERUNG: Einfacher Schwellenwert
+        # cv2.THRESH_BINARY_INV: Erzeugt WEISSEN TEXT auf SCHWARZEM GRUND (optimal für den LOTRO-Text).
+        # Schwellenwert 180 ist ein guter Startpunkt für gold-weißen Text auf dunklem Hintergrund.
+        ret, optimized_img = cv2.threshold(denoised, 180, 255, cv2.THRESH_BINARY_INV) 
 
-        # 4. Inversion: Erzeugt SCHWARZEN TEXT auf WEISSEM GRUND (optimal für Tesseract)
-        optimized_img = cv2.bitwise_not(optimized_img)
+        # Die vorherige Zeile cv2.bitwise_not(optimized_img) wurde entfernt.
         
         if self.config.get("debug_mode", False):
             cv2.imwrite("last_detection_debug_corrected.png", optimized_img)
