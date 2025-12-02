@@ -30,8 +30,10 @@ class LotroApp:
         self.root = root
         self.root.title("LOTRO Voice Companion 2.0")
         
+        # KORREKTUR: Fenstergröße stabilisieren
         self.root.geometry("1000x800")
-        self.root.resizable(False, False) 
+        self.root.minsize(1000, 800) # Minimale Größe festlegen
+        self.root.resizable(True, True) # Größenänderung erlauben, um Layout-Konflikte zu vermeiden
         self.root.configure(bg=COLOR_BG_MAIN)
         
         self.setup_styles()
@@ -186,7 +188,10 @@ class LotroApp:
         api_frame.pack(fill="x", pady=(10, 15), padx=5)
 
         self.ent_api_key = create_entry(api_frame, "ElevenLabs API Key:", show="*")
-        self.ent_delay = create_entry(api_frame, "Verzögerung vor Audio-Wiedergabe (Sekunden):")
+        
+        # KORREKTUR: Text der Verzögerung angepasst, da 0.0 Standard ist
+        self.ent_delay = create_entry(api_frame, "Zusätzliche Audio-Verzögerung (Sekunden, Standard: 0.0):")
+        
         self.ent_hotkey = create_entry(api_frame, "Globaler Hotkey (z.B. ctrl+alt+s):")
         
         ocr_frame = tk.LabelFrame(scrollable_frame, text="OCR & Pfad Konfiguration", bg=COLOR_BG_FRAME, fg=COLOR_TEXT_GOLD, font=FONT_BOLD, padx=5, pady=5)
@@ -257,7 +262,10 @@ class LotroApp:
         self.ent_tesseract.insert(0, cfg.get("tesseract_path", ""))
         self.ent_logpath.insert(0, cfg.get("lotro_log_path", ""))
         self.ent_hotkey.insert(0, cfg.get("hotkey", "ctrl+alt+s"))
-        self.ent_delay.insert(0, str(cfg.get("audio_delay", 0.5)))
+        
+        # KORREKTUR: Standardwert für Verzögerung auf 0.0 setzen
+        self.ent_delay.insert(0, str(cfg.get("audio_delay", 0.0)))
+        
         self.cmb_monitor.set(str(cfg.get("monitor_index", 1)))
         self.var_debug.set(cfg.get("debug_mode", False))
         
