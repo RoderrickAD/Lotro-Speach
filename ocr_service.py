@@ -126,7 +126,7 @@ class OCRExtractor:
             final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
             final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
             
-            padding = 10
+            padding = -5
             final_x1 = max(0, final_x1 - padding)
             final_y1 = max(0, final_y1 - padding)
             final_x2 = min(w_img, final_x2 + padding)
