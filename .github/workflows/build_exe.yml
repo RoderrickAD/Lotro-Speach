@@ -1,4 +1,4 @@
-name: 🔨 Build Windows EXE (Spec File Strategy)
+name: 🔨 Build Windows EXE (Fixed Syntax)
 
 on:
   workflow_dispatch:
@@ -26,8 +26,7 @@ jobs:
 
     - name: 🔍 Diagnose (Dateiprüfung)
       run: |
-        # Wir prüfen, ob die Datei wirklich da ist und wie sie geschrieben wird
-        Get-ChildItem -Recurse | ForEach-Object { Write-Host $_.FullName }
+        Get-ChildItem -Filter "*.py" | ForEach-Object { Write-Host "Gefunden: $($_.FullName)" }
       shell: pwsh
 
     - name: 📝 Spec-File erstellen und Builden
@@ -36,17 +35,25 @@ jobs:
         import PyInstaller.__main__
         import os
         
-        # Arbeitsverzeichnis holen
+        # 1. Pfade vorbereiten (WICHTIG: Forward Slashes nutzen, um Backslash-Fehler zu vermeiden)
         work_dir = os.getcwd()
-        print(f'Work Dir: {work_dir}')
+        safe_work_dir = work_dir.replace('\\', '/')
+        
+        print(f'Work Dir: {safe_work_dir}')
 
         # Icon Pfad prüfen
-        icon_path = os.path.join(work_dir, 'app_icon.ico')
-        has_icon = os.path.exists(icon_path)
-        icon_str = f"'{icon_path}'" if has_icon else 'None'
+        icon_path_raw = os.path.join(work_dir, 'app_icon.ico')
+        if os.path.exists(icon_path_raw):
+            # Auch hier: Slashes sicher machen
+            safe_icon_path = icon_path_raw.replace('\\', '/')
+            icon_str = f"'{safe_icon_path}'"
+            print(f"Icon gefunden: {safe_icon_path}")
+        else:
+            icon_str = 'None'
+            print("Kein Icon gefunden.")
 
-        # WICHTIG: Hier definieren wir den Inhalt der .spec Datei manuell.
-        # Wir fügen 'ocr_service' HARTCODIERT zu den hiddenimports hinzu.
+        # 2. Spec-File Inhalt definieren
+        # Wir nutzen jetzt die Variable {safe_work_dir}, die keine Backslashes mehr hat.
         spec_content = f"""
         # -*- mode: python ; coding: utf-8 -*-
 
@@ -54,10 +61,10 @@ jobs:
 
         a = Analysis(
             ['main.py'],
-            pathex=['{work_dir.replace("\\", "\\\\")}'],
+            pathex=['{safe_work_dir}'],
             binaries=[],
             datas=[],
-            # HIER IST DER FIX: Wir zwingen PyInstaller, diese Module einzubinden
+            # HARTCODIERTE IMPORTS DAMIT OCR_SERVICE GEFUNDEN WIRD
             hiddenimports=['ocr_service', 'core', 'tts_service', 'utils', 'pygame'],
             hookspath=[],
             hooksconfig={{}},
@@ -69,11 +76,12 @@ jobs:
             noarchive=False,
         )
 
-        # Configs hinzufügen (falls vorhanden)
-        if os.path.exists('config.json'):
-            a.datas += [('config.json', '{work_dir.replace("\\", "\\\\")}\\\\config.json', 'DATA')]
-        if os.path.exists('voice_mapping.json'):
-            a.datas += [('voice_mapping.json', '{work_dir.replace("\\", "\\\\")}\\\\voice_mapping.json', 'DATA')]
+        # Configs einbinden (wenn vorhanden)
+        import os
+        if os.path.exists('{safe_work_dir}/config.json'):
+            a.datas += [('config.json', '{safe_work_dir}/config.json', 'DATA')]
+        if os.path.exists('{safe_work_dir}/voice_mapping.json'):
+            a.datas += [('voice_mapping.json', '{safe_work_dir}/voice_mapping.json', 'DATA')]
 
         pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -101,15 +109,15 @@ jobs:
         )
         """
 
-        # Spec Datei schreiben
+        # 3. Spec Datei schreiben
         with open('main.spec', 'w', encoding='utf-8') as f:
             f.write(spec_content)
         
-        print("--- MAIN.SPEC WURDE ERSTELLT ---")
+        print("--- MAIN.SPEC INHALT ---")
         print(spec_content)
-        print("--------------------------------")
+        print("------------------------")
 
-        # PyInstaller mit der Spec-Datei starten
+        # 4. PyInstaller starten
         PyInstaller.__main__.run(['main.spec', '--clean', '--noconfirm'])
         "@
         
