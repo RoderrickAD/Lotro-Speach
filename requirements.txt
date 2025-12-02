@@ -6,3 +6,5 @@ pytesseract
 opencv-python
 mss
 pygame
+numpy
+difflib
