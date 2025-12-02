@@ -139,7 +139,7 @@ class OCRExtractor:
         final_y2 = max(found_positions["bottom_left"][1] + self.templates["bottom_left"].shape[0], 
                        found_positions["bottom_right"][1] + self.templates["bottom_right"].shape[0])
         
-        padding = 3
+        padding = 10
         final_x1 = max(0, final_x1 - padding)
         final_y1 = max(0, final_y1 - padding)
         final_x2 = min(img.shape[1], final_x2 + padding)
@@ -153,38 +153,14 @@ class OCRExtractor:
         
         log_message(f"Dialograhmen mittels Template Matching gefunden: ({final_x1}, {final_y1}) bis ({final_x2}, {final_y2})")
 
-# 1. Konvertierung in HSV
-        hsv_region = cv2.cvtColor(dialog_region, cv2.COLOR_BGR2HSV)
-        
-        # --- A. MASKE FÜR GOLD/GELB ---
-        # H: 20-40, S: 100-255, V: 150-255 (Breiter Bereich für den Goldton)
-        lower_gold = np.array([20, 100, 150], dtype=np.uint8)
-        upper_gold = np.array([40, 255, 255], dtype=np.uint8)
-        mask_gold = cv2.inRange(hsv_region, lower_gold, upper_gold)
-        
-        # --- B. MASKE FÜR WEISS/HELLGRAU ---
-        # Weiß hat einen H-Wert nahe 0, eine geringe Sättigung (S: 0-50) und hohe Helligkeit (V: 200-255)
-        lower_white = np.array([0, 0, 200], dtype=np.uint8) 
-        upper_white = np.array([180, 50, 255], dtype=np.uint8) 
-        mask_white = cv2.inRange(hsv_region, lower_white, upper_white)
-
-        # 2. Masken kombinieren (ODER-Verknüpfung)
-        combined_mask = cv2.bitwise_or(mask_gold, mask_white)
-        
-        # 3. Inversion und Binarisierung: Erzeugt SCHWARZEN Text auf WEISSEM Hintergrund.
-        # Alles in der Maske (Gold ODER Weiß) wird Weiß (255), der Rest Schwarz (0).
-        optimized_img = cv2.bitwise_not(combined_mask)
-
-        # 4. Morphologie (Glättung)
-        kernel = np.ones((1, 1), np.uint8)
-        optimized_img = cv2.dilate(optimized_img, kernel, iterations=1)
-        optimized_img = cv2.erode(optimized_img, kernel, iterations=1)
-
+        # HIER IST DIE KORREKTUR: Sende das zugeschnittene Originalbild
         
         if self.config.get("debug_mode", False):
-            cv2.imwrite("last_detection_debug_corrected.png", optimized_img)
+            # Speichere das Originalbild als Debug-Ausgabe
+            cv2.imwrite("last_detection_debug_corrected.png", dialog_region)
         
-        return optimized_img
+        # Gebe das Originalbild zurück, ohne Bildverarbeitung
+        return dialog_region 
 
     def _fallback_auto_find_quest_text(self, img):
         """Die ursprüngliche Methode zur Erkennung des Quest-Textes, als Fallback."""
@@ -211,84 +187,4 @@ class OCRExtractor:
         upper_white = np.array([180, 50, 255]) 
         mask = cv2.inRange(hsv, lower_white, upper_white)
         
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
-        dilated = cv2.dilate(mask, kernel, iterations=2)
-        
-        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            return cv2.cvtColor(potential_dialog_area, cv2.COLOR_BGR2GRAY)
-        
-        valid_contours = [c for c in contours if cv2.contourArea(c) > 5000]
-        if not valid_contours:
-            return cv2.cvtColor(potential_dialog_area, cv2.COLOR_BGR2GRAY)
-            
-        best_cnt = max(valid_contours, key=cv2.contourArea)
-
-        rx, ry, rw, rh = cv2.boundingRect(best_cnt)
-        pad = 5
-        rx1 = max(0, rx - pad)
-        ry1 = max(0, ry - pad)
-        rx2 = min(potential_dialog_area.shape[1], rx + rw + pad)
-        ry2 = min(potential_dialog_area.shape[0], ry + rh + pad)
-        
-        cropped_roi = potential_dialog_area[ry1:ry2, rx1:rx2]
-        cropped_mask = mask[ry1:ry2, rx1:rx2]
-        
-        masked_image = cv2.bitwise_and(cropped_roi, cropped_roi, mask=cropped_mask)
-        
-        final_image = self.crop_to_content(masked_image)
-        
-        if self.config.get("debug_mode", False):
-            cv2.imwrite("last_detection_debug_fallback.png", final_image)
-        
-        gray_image = cv2.cvtColor(final_image, cv2.COLOR_BGR2GRAY)
-        denoised = cv2.medianBlur(gray_image, 3)
-        return denoised
-
-    def run_ocr(self):
-        try:
-            img = self.get_monitor_screenshot()
-            if img is None: 
-                return ""
-            
-            if self.config.get("debug_mode", False):
-                cv2.imwrite("last_screenshot_debug_original.png", img)
-
-            optimized_img = self.auto_find_quest_text(img)
-            
-            ocr_lang = self.config.get("ocr_language", "deu+eng")
-            ocr_psm = self.config.get("ocr_psm", 6)
-            
-            whitelist = self.config.get("ocr_whitelist", 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzäöüÄÖÜß0123456789.,?!:;\'"()[]-/')
-
-            config = f'--oem 3 --psm {ocr_psm} -l {ocr_lang} -c tessedit_char_whitelist="{whitelist}"'
-            
-            raw_text = pytesseract.image_to_string(optimized_img, config=config)
-            
-            lines = raw_text.split('\n')
-            
-            cleaned_lines = self._filter_recognized_lines(lines)
-
-            clean_output = ' '.join(cleaned_lines)
-            clean_output = re.sub(r'\s+', ' ', clean_output).strip()
-            
-            clean_output = re.sub(r'(?:l|I|1)oo|o(?:l|I|1)|oo(?:l|I|1)', '', clean_output, flags=re.IGNORECASE) 
-            clean_output = re.sub(r'oo|Oo|oO|Solo|solo|NYZ B|„Aa 1', '', clean_output)
-            clean_output = re.sub(r'‘', "'", clean_output)
-            
-            if len(clean_output) < 10:
-                return ""
-            
-            try:
-                with open("last_recognized_text.txt", "w", encoding="utf-8") as f:
-                    f.write("--- RAW TESSERACT OUTPUT ---\n")
-                    f.write(raw_text)
-                    f.write("\n\n--- FILTERED OUTPUT (SEND TO AI) ---\n")
-                    f.write(clean_output)
-            except: pass
-            
-            return clean_output
-        except Exception as e:
-            log_message(f"OCR Fehler: {e}")
-            return ""
+        kernel = cv2.
