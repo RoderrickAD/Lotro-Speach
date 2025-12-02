@@ -1,0 +1,11 @@
+# Mindestanforderungen für Ihr Projekt
+pyinstaller
+pytesseract
+opencv-python
+mss
+numpy
+requests
+pygame
+keyboard
+# Wenn Sie tkinter nicht standardmäßig verwenden:
+Pillow
