@@ -1,0 +1,64 @@
+name: 🔨 Build Windows Executable (pyinstaller)
+
+on:
+  # Erlaubt die manuelle Ausführung über die GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      pyinstaller_flags:
+        description: 'Zusätzliche PyInstaller-Flags (z.B. --onefile --noconsole)'
+        required: false
+        default: '--onefile'
+        
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build_windows_exe:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Repository auschecken
+      uses: actions/checkout@v4
+
+    - name: 🐍 Python Setup (Version ${{ env.PYTHON_VERSION }})
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: ⚙️ Systemabhängigkeiten installieren (PyInstaller)
+      run: |
+        pip install pyinstaller
+        pip install -r requirements.txt
+      # Anmerkung: Die `requirements.txt` muss alle Projektabhängigkeiten enthalten.
+
+    - name: 📦 PyInstaller-Build ausführen
+      id: build
+      run: |
+        # Wir bauen `main.py`
+        $build_command = "pyinstaller main.py ${{ github.event.inputs.pyinstaller_flags }}"
+        Write-Host "Führe aus: $build_command"
+        Invoke-Expression $build_command
+        
+        # Windows-Name für die EXE-Datei extrahieren
+        $exe_name = "main.exe"
+        if ($build_command -like "*--name*") {
+          $match = $build_command | Select-String -Pattern "--name\s+([\w-]+)"
+          if ($match) {
+            $exe_name = "$($match.Matches.Groups[1].Value).exe"
+          }
+        }
+        echo "EXE_NAME=$exe_name" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
+    - name: 📂 Umbenennen der ausführbaren Datei
+      run: |
+        # Der Output-Ordner ist 'dist'
+        Move-Item "dist/${{ steps.build.outputs.EXE_NAME }}" "dist/LOTRO_Voice_Companion.exe"
+      shell: pwsh
+
+    - name: 📤 Artefakt hochladen
+      uses: actions/upload-artifact@v4
+      with:
+        name: LOTRO-Voice-Companion-Windows-EXE
+        path: dist/LOTRO_Voice_Companion.exe
+        # Anmerkung: PyInstaller erstellt den 'dist'-Ordner
