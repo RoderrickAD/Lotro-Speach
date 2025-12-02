@@ -1,4 +1,4 @@
-name: 🔨 Build Windows Executable (Final Fix)
+name: 🔨 Build Windows EXE (Spec File Strategy)
 
 on:
   workflow_dispatch:
@@ -24,57 +24,95 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: 🛠️ Build-Skript (Absolute Pfade)
+    - name: 🔍 Diagnose (Dateiprüfung)
+      run: |
+        # Wir prüfen, ob die Datei wirklich da ist und wie sie geschrieben wird
+        Get-ChildItem -Recurse | ForEach-Object { Write-Host $_.FullName }
+      shell: pwsh
+
+    - name: 📝 Spec-File erstellen und Builden
       run: |
         $scriptContent = @"
         import PyInstaller.__main__
         import os
-        import sys
-
-        # 1. Den absoluten Pfad zum Arbeitsverzeichnis ermitteln
-        # Das verhindert, dass PyInstaller Dateien "übersieht"
-        work_dir = os.path.abspath(os.getcwd())
-        print(f'--- ARBEITSVERZEICHNIS: {work_dir} ---')
-
-        # 2. Alle deine Python-Module finden (automatisches Hidden-Import)
-        hidden_imports = []
-        files_found = []
         
-        for f in os.listdir(work_dir):
-            if f.endswith('.py') and f != 'main.py' and f != 'builder.py':
-                name = f[:-3] # .py Endung entfernen
-                hidden_imports.append(f'--hidden-import={name}')
-                files_found.append(name)
-        
-        print(f'Gefundene Module für Import: {files_found}')
+        # Arbeitsverzeichnis holen
+        work_dir = os.getcwd()
+        print(f'Work Dir: {work_dir}')
 
-        # 3. Icon Einbindung (mit absolutem Pfad)
-        icon_args = []
+        # Icon Pfad prüfen
         icon_path = os.path.join(work_dir, 'app_icon.ico')
-        if os.path.exists(icon_path):
-            print(f'ICON GEFUNDEN: {icon_path}')
-            icon_args = [f'--icon={icon_path}']
-        else:
-            print('WARNUNG: app_icon.ico nicht gefunden! Standard-Icon wird genutzt.')
+        has_icon = os.path.exists(icon_path)
+        icon_str = f"'{icon_path}'" if has_icon else 'None'
 
-        # 4. Der PyInstaller Befehl
-        # --paths={work_dir} ist der wichtigste Teil gegen den Import-Fehler!
-        args = [
-            os.path.join(work_dir, 'main.py'),
-            '--onefile',
-            '--name=LOTRO_Voice_Companion',
-            f'--paths={work_dir}',           # Zwingt PyInstaller, hier zu suchen
-            '--collect-all=pygame',
-            '--clean',
-            '--noconfirm',
-            '--windowed'                     # --windowed = Kein schwarzes Konsolenfenster
-        ] + hidden_imports + icon_args
+        # WICHTIG: Hier definieren wir den Inhalt der .spec Datei manuell.
+        # Wir fügen 'ocr_service' HARTCODIERT zu den hiddenimports hinzu.
+        spec_content = f"""
+        # -*- mode: python ; coding: utf-8 -*-
 
-        print('--- STARTE PYINSTALLER ---')
-        PyInstaller.__main__.run(args)
+        block_cipher = None
+
+        a = Analysis(
+            ['main.py'],
+            pathex=['{work_dir.replace("\\", "\\\\")}'],
+            binaries=[],
+            datas=[],
+            # HIER IST DER FIX: Wir zwingen PyInstaller, diese Module einzubinden
+            hiddenimports=['ocr_service', 'core', 'tts_service', 'utils', 'pygame'],
+            hookspath=[],
+            hooksconfig={{}},
+            runtime_hooks=[],
+            excludes=[],
+            win_no_prefer_redirects=False,
+            win_private_assemblies=False,
+            cipher=block_cipher,
+            noarchive=False,
+        )
+
+        # Configs hinzufügen (falls vorhanden)
+        if os.path.exists('config.json'):
+            a.datas += [('config.json', '{work_dir.replace("\\", "\\\\")}\\\\config.json', 'DATA')]
+        if os.path.exists('voice_mapping.json'):
+            a.datas += [('voice_mapping.json', '{work_dir.replace("\\", "\\\\")}\\\\voice_mapping.json', 'DATA')]
+
+        pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+        exe = EXE(
+            pyz,
+            a.scripts,
+            a.binaries,
+            a.zipfiles,
+            a.datas,
+            [],
+            name='LOTRO_Voice_Companion',
+            debug=False,
+            bootloader_ignore_signals=False,
+            strip=False,
+            upx=True,
+            upx_exclude=[],
+            runtime_tmpdir=None,
+            console=False, 
+            disable_windowed_traceback=False,
+            argv_emulation=False,
+            target_arch=None,
+            codesign_identity=None,
+            entitlements_file=None,
+            icon={icon_str}, 
+        )
+        """
+
+        # Spec Datei schreiben
+        with open('main.spec', 'w', encoding='utf-8') as f:
+            f.write(spec_content)
+        
+        print("--- MAIN.SPEC WURDE ERSTELLT ---")
+        print(spec_content)
+        print("--------------------------------")
+
+        # PyInstaller mit der Spec-Datei starten
+        PyInstaller.__main__.run(['main.spec', '--clean', '--noconfirm'])
         "@
         
-        # Skript speichern und ausführen
         $scriptContent | Out-File -FilePath builder.py -Encoding utf8
         python builder.py
       shell: pwsh
