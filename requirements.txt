@@ -6,3 +6,4 @@ requests
 keyboard
 pytesseract
 opencv-python
+mss
