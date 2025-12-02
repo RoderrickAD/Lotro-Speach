@@ -153,27 +153,38 @@ class OCRExtractor:
         
         log_message(f"Dialograhmen mittels Template Matching gefunden: ({final_x1}, {final_y1}) bis ({final_x2}, {final_y2})")
 
-        # KORRIGIERTE BILDVERARBEITUNG FÜR OPTIMIERTE OCR 
-        final_image_gray = cv2.cvtColor(dialog_region, cv2.COLOR_BGR2GRAY)
+# 1. Konvertierung in HSV
+        hsv_region = cv2.cvtColor(dialog_region, cv2.COLOR_BGR2HSV)
         
-        # 1. Kontrastverbesserung (CLAHE)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        contrasted = clahe.apply(final_image_gray)
+        # 2. Definition des Farbbereichs (Gelb/Gold)
+        # Die Werte können je nach LOTRO-Monitor/Helligkeit leicht variieren.
+        # Hier ist ein breiter Bereich für Gelb/Gold (H: 20-40, S: 100-255, V: 150-255)
+        # H: Farbton, S: Sättigung, V: Helligkeit
+        lower_gold = np.array([20, 100, 150], dtype=np.uint8)
+        upper_gold = np.array([40, 255, 255], dtype=np.uint8)
         
-        # 2. Stärkere Rauschunterdrückung
-        denoised = cv2.medianBlur(contrasted, 3) 
+        # 3. Erstellen der Maske
+        mask = cv2.inRange(hsv_region, lower_gold, upper_gold)
         
-        # 3. STATT AGGRESSIVER BINARISIERUNG: Einfacher Schwellenwert
-        # cv2.THRESH_BINARY_INV: Erzeugt WEISSEN TEXT auf SCHWARZEM GRUND (optimal für den LOTRO-Text).
-        # Schwellenwert 180 ist ein guter Startpunkt für gold-weißen Text auf dunklem Hintergrund.
-        ret, optimized_img = cv2.threshold(denoised, 180, 255, cv2.THRESH_BINARY_INV) 
+        # 4. Maske anwenden: Isoliert nur den Text auf schwarzem Hintergrund.
+        # masked_text_only = cv2.bitwise_and(dialog_region, dialog_region, mask=mask)
+        
+        # 5. Inversion und Binarisierung: Erzeugt SCHWARZEN Text auf WEISSEM Hintergrund.
+        # Alles in der Maske wird Weiß (255), der Rest Schwarz (0).
+        # Tesseract arbeitet am besten mit dunklem Text auf hellem Grund.
+        # Wir verwenden die Maske direkt, um das Ergebnis zu invertieren.
+        optimized_img = cv2.bitwise_not(mask)
 
-        # Die vorherige Zeile cv2.bitwise_not(optimized_img) wurde entfernt.
+        # Letzte Stufe: Glätten des Textes, um Lücken zu schließen (Morphologie)
+        kernel = np.ones((1, 1), np.uint8)
+        optimized_img = cv2.dilate(optimized_img, kernel, iterations=1)
+        optimized_img = cv2.erode(optimized_img, kernel, iterations=1)
+
         
         if self.config.get("debug_mode", False):
             cv2.imwrite("last_detection_debug_corrected.png", optimized_img)
         
-        return optimized_img 
+        return optimized_img
 
     def _fallback_auto_find_quest_text(self, img):
         """Die ursprüngliche Methode zur Erkennung des Quest-Textes, als Fallback."""
