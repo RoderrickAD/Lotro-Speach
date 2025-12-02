@@ -1,9 +1,8 @@
-# Beispiel-Inhalt Ihrer requirements.txt
 pyinstaller
 pyautogui
 requests
-# ... andere Pakete ...
 keyboard
 pytesseract
 opencv-python
 mss
+pygame
