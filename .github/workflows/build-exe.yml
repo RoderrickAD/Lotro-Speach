@@ -18,17 +18,19 @@ jobs:
     - name: 2. Python 3.11 einrichten (Stabile Version)
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # Jetzt auf stabile Version 3.11 gesetzt
+        python-version: '3.11'
         cache: 'pip'
 
     - name: 3. Abhängigkeiten und PyInstaller installieren
+      # Stellt sicher, dass alle Pakete (einschließlich mss) installiert werden.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: 4. EXE-Datei mit PyInstaller erstellen (ALLE HIDDEN IMPORTS)
+    - name: 4. EXE-Datei mit PyInstaller erstellen (FINALE KORREKTUR)
       run: |
-        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract --hidden-import=cv2 main.py
+        # Fügt alle Module (keyboard, pytesseract, cv2, mss) explizit hinzu.
+        pyinstaller --onefile --name "Lotro-Speach" --hidden-import=keyboard --hidden-import=pytesseract --hidden-import=cv2 --hidden-import=mss main.py
       working-directory: .
 
     - name: 5. Artefakt hochladen
