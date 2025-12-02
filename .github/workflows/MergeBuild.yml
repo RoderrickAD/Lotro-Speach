@@ -1,4 +1,4 @@
-name: 🔨 Repair & Build Windows EXE
+name: 🔨 Build Windows EXE (Single File Merge Strategy)
 
 on:
   workflow_dispatch:
@@ -24,155 +24,99 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: 🚑 REPARATUR: ocr_service.py neu schreiben
-      run: |
-        # Wir überschreiben die kaputte Datei mit einer funktionierenden Version.
-        # Dies behebt den Syntax-Fehler und fügt die fehlende run_ocr Funktion hinzu.
-        $fixedCode = @"
-        import pytesseract
-        import cv2
-        import numpy as np
-        import mss 
-        import mss.tools 
-        import re
-        import os
-        from utils import log_message
-
-        class OCRExtractor:
-            def __init__(self, config):
-                self.config = config
-                tess_path = self.config.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
-                pytesseract.pytesseract.tesseract_cmd = tess_path
-                self.templates = self._load_templates()
-
-            def _load_templates(self):
-                template_dir = os.path.join(os.getcwd(), "templates")
-                templates = {}
-                names = {"top_left": "top_left.png", "top_right": "top_right.png", "bottom_right": "bottom_right.png", "bottom_left": "bottom_left.png"}
-                if not os.path.exists(template_dir): return None
-                for key, filename in names.items():
-                    fp = os.path.join(template_dir, filename)
-                    if os.path.exists(fp):
-                        templates[key] = cv2.imread(fp, cv2.IMREAD_GRAYSCALE)
-                return templates if len(templates) == 4 else None
-
-            def get_monitor_screenshot(self):
-                try:
-                    mon_idx = int(self.config.get("monitor_index", 1))
-                    with mss.mss() as sct:
-                        if mon_idx > len(sct.monitors) - 1: mon_idx = 1
-                        img = np.array(sct.grab(sct.monitors[mon_idx]))
-                        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                except: return None
-
-            def auto_find_quest_text(self, img):
-                # Vereinfachte Logik für Robustheit
-                if self.templates:
-                    # Template Matching Logik hier (gekürzt für Stabilität)
-                    pass
-                return self._fallback_auto_find_quest_text(img)
-
-            def _fallback_auto_find_quest_text(self, img):
-                h, w = img.shape[:2]
-                if h < 50: return img
-                # Standard Crop
-                crop = img[int(h*0.12):int(h*0.88), int(w*0.18):int(w*0.95)]
-                
-                # REPARATUR DES FEHLERS HIER:
-                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                # Maskierung für weißen Text
-                _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-                
-                # Morphologie um Textblöcke zu verbinden
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,5))
-                dilated = cv2.dilate(mask, kernel, iterations=2)
-                
-                contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    c = max(contours, key=cv2.contourArea)
-                    x, y, w_c, h_c = cv2.boundingRect(c)
-                    # Etwas Padding
-                    return crop[y:y+h_c, x:x+w_c]
-                return crop
-
-            def run_ocr(self):
-                # DIESE FUNKTION FEHLTE IM ORIGINAL
-                img = self.get_monitor_screenshot()
-                if img is None: return ""
-                
-                cropped = self.auto_find_quest_text(img)
-                gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
-                
-                # Tesseract Konfiguration
-                custom_config = f'--psm {self.config.get("ocr_psm", 6)}'
-                whitelist = self.config.get("ocr_whitelist", "")
-                if whitelist:
-                    custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
-                
-                txt = pytesseract.image_to_string(gray, lang=self.config.get("ocr_language", "deu+eng"), config=custom_config)
-                return txt.strip()
-        "@
-        
-        $fixedCode | Out-File -FilePath ocr_service.py -Encoding utf8
-        Write-Host "ocr_service.py wurde erfolgreich repariert."
-      shell: pwsh
-
-    - name: 🧬 Python-Skripte verschmelzen
+    - name: 🧬 Python-Skripte verschmelzen (Merger)
       run: |
         $mergerScript = @"
         import os
 
-        # utils zuerst, main zuletzt
+        # 1. Die Reihenfolge ist extrem wichtig! 
+        # utils muss zuerst kommen, da andere darauf zugreifen.
+        # main muss als letztes kommen, da es die App startet.
         file_order = ['utils.py', 'ocr_service.py', 'tts_service.py', 'core.py', 'main.py']
         
-        local_imports = ['from utils', 'import utils', 'from ocr_service', 'import ocr_service', 
-                         'from tts_service', 'import tts_service', 'from core', 'import core']
+        # Diese Importe müssen wir aus den Dateien entfernen, da jetzt alles in einer Datei ist.
+        local_imports_to_remove = [
+            'from utils', 'import utils',
+            'from ocr_service', 'import ocr_service',
+            'from tts_service', 'import tts_service',
+            'from core', 'import core'
+        ]
 
-        combined_code = ["import sys\nimport os\n"]
+        combined_code = []
+        combined_code.append("# --- AUTO-GENERATED COMBINED FILE ---\n")
+        combined_code.append("import sys\nimport os\n") 
 
-        print("Verschmelze Dateien...")
+        print("Starte Verschmelzung...")
+
         for fname in file_order:
             if os.path.exists(fname):
-                print(f" -> {fname}")
+                print(f" -> Verarbeite {fname}")
                 with open(fname, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if not any(line.strip().startswith(imp) for imp in local_imports):
-                            combined_code.append(line)
+                    lines = f.readlines()
+                    
+                combined_code.append(f"\n# ================= {fname} =================\n")
+                
+                for line in lines:
+                    # Prüfen, ob die Zeile ein lokaler Import ist, den wir löschen müssen
+                    should_skip = False
+                    stripped = line.strip()
+                    
+                    # Wir behalten Zeilen, die NICHT mit lokalen Importen beginnen
+                    for imp in local_imports_to_remove:
+                        if stripped.startswith(imp):
+                            should_skip = True
+                            # Sonderfall: "from utils import log_message" -> muss weg
+                            break
+                    
+                    if should_skip:
+                        combined_code.append(f"# [MERGER] REMOVED: {line}")
+                    else:
+                        combined_code.append(line)
             else:
-                print(f"FEHLER: {fname} fehlt!")
+                print(f"FEHLER: Datei {fname} nicht gefunden!")
                 exit(1)
 
+        # Das Ergebnis speichern
         with open('combined_app.py', 'w', encoding='utf-8') as f:
             f.writelines(combined_code)
-        print("Fertig: combined_app.py")
+            
+        print("Erfolg! 'combined_app.py' wurde erstellt.")
         "@
 
         $mergerScript | Out-File -FilePath merger.py -Encoding utf8
         python merger.py
       shell: pwsh
 
-    - name: 📦 EXE bauen
+    - name: 📦 EXE bauen (aus combined_app.py)
       run: |
         $buildScript = @"
         import PyInstaller.__main__
         import os
         
-        work_dir = os.getcwd().replace('\\', '/')
-        icon_path = os.path.join(work_dir, 'app_icon.ico')
-        icon_arg = ['--icon', icon_path] if os.path.exists(icon_path) else []
+        work_dir = os.getcwd()
+        safe_work_dir = work_dir.replace('\\', '/')
+        
+        # Icon prüfen
+        icon_path_raw = os.path.join(work_dir, 'app_icon.ico')
+        if os.path.exists(icon_path_raw):
+            safe_icon_path = icon_path_raw.replace('\\', '/')
+            icon_arg = ['--icon', safe_icon_path]
+        else:
+            icon_arg = []
 
+        # PyInstaller Befehl auf die NEUE, kombinierte Datei
         args = [
-            'combined_app.py',
+            'combined_app.py',             # Wir bauen nur diese eine Datei!
             '--onefile',
             '--name=LOTRO_Voice_Companion',
-            f'--paths={work_dir}',
-            '--collect-all=pygame',
+            f'--paths={safe_work_dir}',
+            '--collect-all=pygame',        # Wichtig für Audio
             '--clean',
             '--noconfirm',
             '--windowed'
         ] + icon_arg
         
-        print("Starte Build...")
+        print("Starte PyInstaller auf combined_app.py...")
         PyInstaller.__main__.run(args)
         "@
         
