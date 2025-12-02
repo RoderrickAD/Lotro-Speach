@@ -139,7 +139,7 @@ class OCRExtractor:
         final_y2 = max(found_positions["bottom_left"][1] + self.templates["bottom_left"].shape[0], 
                        found_positions["bottom_right"][1] + self.templates["bottom_right"].shape[0])
         
-        padding = 10
+        padding = 3
         final_x1 = max(0, final_x1 - padding)
         final_y1 = max(0, final_y1 - padding)
         final_x2 = min(img.shape[1], final_x2 + padding)
@@ -156,26 +156,26 @@ class OCRExtractor:
 # 1. Konvertierung in HSV
         hsv_region = cv2.cvtColor(dialog_region, cv2.COLOR_BGR2HSV)
         
-        # 2. Definition des Farbbereichs (Gelb/Gold)
-        # Die Werte können je nach LOTRO-Monitor/Helligkeit leicht variieren.
-        # Hier ist ein breiter Bereich für Gelb/Gold (H: 20-40, S: 100-255, V: 150-255)
-        # H: Farbton, S: Sättigung, V: Helligkeit
+        # --- A. MASKE FÜR GOLD/GELB ---
+        # H: 20-40, S: 100-255, V: 150-255 (Breiter Bereich für den Goldton)
         lower_gold = np.array([20, 100, 150], dtype=np.uint8)
         upper_gold = np.array([40, 255, 255], dtype=np.uint8)
+        mask_gold = cv2.inRange(hsv_region, lower_gold, upper_gold)
         
-        # 3. Erstellen der Maske
-        mask = cv2.inRange(hsv_region, lower_gold, upper_gold)
-        
-        # 4. Maske anwenden: Isoliert nur den Text auf schwarzem Hintergrund.
-        # masked_text_only = cv2.bitwise_and(dialog_region, dialog_region, mask=mask)
-        
-        # 5. Inversion und Binarisierung: Erzeugt SCHWARZEN Text auf WEISSEM Hintergrund.
-        # Alles in der Maske wird Weiß (255), der Rest Schwarz (0).
-        # Tesseract arbeitet am besten mit dunklem Text auf hellem Grund.
-        # Wir verwenden die Maske direkt, um das Ergebnis zu invertieren.
-        optimized_img = cv2.bitwise_not(mask)
+        # --- B. MASKE FÜR WEISS/HELLGRAU ---
+        # Weiß hat einen H-Wert nahe 0, eine geringe Sättigung (S: 0-50) und hohe Helligkeit (V: 200-255)
+        lower_white = np.array([0, 0, 200], dtype=np.uint8) 
+        upper_white = np.array([180, 50, 255], dtype=np.uint8) 
+        mask_white = cv2.inRange(hsv_region, lower_white, upper_white)
 
-        # Letzte Stufe: Glätten des Textes, um Lücken zu schließen (Morphologie)
+        # 2. Masken kombinieren (ODER-Verknüpfung)
+        combined_mask = cv2.bitwise_or(mask_gold, mask_white)
+        
+        # 3. Inversion und Binarisierung: Erzeugt SCHWARZEN Text auf WEISSEM Hintergrund.
+        # Alles in der Maske (Gold ODER Weiß) wird Weiß (255), der Rest Schwarz (0).
+        optimized_img = cv2.bitwise_not(combined_mask)
+
+        # 4. Morphologie (Glättung)
         kernel = np.ones((1, 1), np.uint8)
         optimized_img = cv2.dilate(optimized_img, kernel, iterations=1)
         optimized_img = cv2.erode(optimized_img, kernel, iterations=1)
