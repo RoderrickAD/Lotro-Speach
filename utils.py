@@ -6,34 +6,55 @@ CONFIG_FILE = "config.json"
 MAPPING_FILE = "voice_mapping.json"
 LOG_FILE = "app.log"
 
+# Hier fügen wir die neuen Padding-Werte hinzu
 DEFAULT_CONFIG = {
     "api_key": "",
     "tesseract_path": r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     "lotro_log_path": os.path.join(os.path.expanduser("~"), "Documents", "The Lord of the Rings Online", "Script.log"),
-    "ocr_coords": None, # None bedeutet: Ganzer Monitor wird gescannt
+    "ocr_coords": None, 
     "hotkey": "ctrl+alt+s",
-    "monitor_index": 1, # 1 = Hauptmonitor
-    "audio_delay": 0.5  # Sekunden Pause vor Sprachausgabe
+    "monitor_index": 1, 
+    "audio_delay": 0.5,
+    "ocr_language": "deu+eng",
+    "ocr_psm": 6,
+    "ocr_whitelist": "",
+    "debug_mode": False,
+    # --- NEUE WERTE FÜR KALIBRIERUNG ---
+    "padding_top": 10,
+    "padding_bottom": 20,
+    "padding_left": 10,
+    "padding_right": 50  # Standardmäßig etwas mehr rechts
 }
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG
+        return DEFAULT_CONFIG.copy() # Kopie zurückgeben, um Seiteneffekte zu vermeiden
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # Fehlende Keys mit Defaults ergänzen
+            
+            # Fehlende Keys mit Defaults ergänzen (Migration)
+            updated = False
             for key, val in DEFAULT_CONFIG.items():
                 if key not in data:
                     data[key] = val
+                    updated = True
+            
+            # Wenn neue Keys hinzugefügt wurden, Datei sofort aktualisieren
+            if updated:
+                save_config(data)
+                
             return data
     except:
-        return DEFAULT_CONFIG
+        return DEFAULT_CONFIG.copy()
 
 def save_config(config_data):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=4)
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=4)
+    except Exception as e:
+        print(f"Fehler beim Speichern der Config: {e}")
 
 def load_mapping():
     if not os.path.exists(MAPPING_FILE):
@@ -45,8 +66,11 @@ def load_mapping():
         return {}
 
 def save_mapping(mapping_data):
-    with open(MAPPING_FILE, "w", encoding="utf-8") as f:
-        json.dump(mapping_data, f, indent=4)
+    try:
+        with open(MAPPING_FILE, "w", encoding="utf-8") as f:
+            json.dump(mapping_data, f, indent=4)
+    except:
+        pass
 
 def log_message(message):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
