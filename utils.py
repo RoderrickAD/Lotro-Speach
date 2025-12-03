@@ -7,9 +7,10 @@ MAPPING_FILE = "voice_mapping.json"
 LOG_FILE = "app.log"
 
 DEFAULT_CONFIG = {
-    "api_key": "",          # ElevenLabs Key
-    "gemini_api_key": "",   # NEU: Google Gemini Key
-    "use_ai_ocr": False,    # NEU: Schalter für KI-Modus
+    "api_key": "",          
+    "gemini_api_key": "",   
+    "use_ai_ocr": False,    
+    "gemini_model_name": "models/gemini-1.5-flash", # NEU: Standard-Modell
     
     "tesseract_path": r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     "lotro_log_path": os.path.join(os.path.expanduser("~"), "Documents", "The Lord of the Rings Online", "Script.log"),
