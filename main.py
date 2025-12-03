@@ -27,60 +27,31 @@ class DraggableRect:
         self.name = name
         self.x = x; self.y = y; self.w = size; self.h = size
         
-        # Eindeutige Tags für dieses Objekt
-        self.tag_root = f"item_{name}"      # Tag für ALLES (Rahmen + Griff + Text)
-        self.tag_rect = f"rect_{name}"      # Tag nur für den Rahmen
-        self.tag_handle = f"handle_{name}"  # Tag für den roten Griff
+        self.tag_root = f"item_{name}"
+        self.tag_rect = f"rect_{name}"
+        self.tag_handle = f"handle_{name}"
         
         self.draw()
 
     def draw(self):
-        # Alte Zeichnung löschen (wichtig beim Resizen)
         self.canvas.delete(self.tag_root)
-
-        # 1. Der Rahmen (mit 'stipple' für Transparenz-Effekt, damit man ihn gut greifen kann)
-        self.canvas.create_rectangle(
-            self.x, self.y, self.x+self.w, self.y+self.h, 
-            outline=COLOR_TEXT_GOLD, 
-            width=3, 
-            fill="gray25", stipple="gray25", # Halbtransparent füllen
-            tags=(self.tag_root, self.tag_rect)
-        )
-        
-        # 2. Resize Handle (Unten Rechts, Rot & Groß)
+        self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, outline=COLOR_TEXT_GOLD, width=3, fill="gray25", stipple="gray25", tags=(self.tag_root, self.tag_rect))
         handle_sz = 15
-        self.canvas.create_rectangle(
-            self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h, 
-            fill="red", outline="white", 
-            tags=(self.tag_root, self.tag_handle)
-        )
-
-        # 3. Fadenkreuz (Mitte - Das Ziel)
+        self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h, fill="red", outline="white", tags=(self.tag_root, self.tag_handle))
         cx, cy = self.x + self.w/2, self.y + self.h/2
         self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
         self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
-
-        # 4. Label Text
-        self.canvas.create_text(
-            self.x, self.y-12, 
-            text=self.name.replace("_", " ").title(), 
-            fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), 
-            tags=self.tag_root
-        )
+        self.canvas.create_text(self.x, self.y-12, text=self.name.replace("_", " ").title(), fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), tags=self.tag_root)
 
     def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
+        self.x += dx; self.y += dy
         self.canvas.move(self.tag_root, dx, dy)
 
     def resize(self, new_w, new_h):
-        # Mindestgröße 20px
-        self.w = max(20, new_w)
-        self.h = max(20, new_h)
-        self.draw() # Neu zeichnen ist einfacher als einzelne Punkte verschieben
+        self.w = max(20, new_w); self.h = max(20, new_h)
+        self.draw() 
 
     def highlight(self, active=True):
-        # Visuelles Feedback beim Klicken
         color = "white" if active else COLOR_TEXT_GOLD
         self.canvas.itemconfig(self.tag_rect, outline=color)
 
@@ -88,7 +59,7 @@ class LotroApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Der Vorleser von Mittelerde - Companion 2.0")
-        self.root.geometry("1100x850")
+        self.root.geometry("1100x900")
         self.root.configure(bg=COLOR_BG_DARK)
         
         if os.path.exists("app_icon.ico"): self.root.iconbitmap("app_icon.ico")
@@ -103,7 +74,7 @@ class LotroApp:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both", padx=15, pady=15)
 
-        self.tab_status = self.create_tab(self.notebook, "Das Auge (Status)")
+        self.tab_status = self.create_tab(self.notebook, "Das Auge (Status & Vision)")
         self.tab_calib = self.create_tab(self.notebook, "Die Schmiede (Kalibrierung)")
         self.tab_settings = self.create_tab(self.notebook, "Die Schriften (Einstellungen)")
 
@@ -114,12 +85,15 @@ class LotroApp:
         self.load_settings_to_ui()
         self.register_hotkey()
 
-        # Variablen für Kalibrierung
         self.calib_img_raw = None
         self.template_rects = {} 
         self.active_rect = None
-        self.action_mode = None # 'move' oder 'resize'
+        self.action_mode = None
         self.last_mouse = (0, 0)
+
+        # Cache für Bilder
+        self.debug_photo_1 = None
+        self.debug_photo_2 = None
 
     def setup_background(self):
         bg_path = "background.png"
@@ -160,18 +134,68 @@ class LotroApp:
         if show: entry.config(show=show)
         return entry
 
-    # --- TAB 1: STATUS ---
+    # --- TAB 1: DAS AUGE (Text + Bilder) ---
     def setup_status_tab(self):
-        self.lbl_status = ttk.Label(self.tab_status, text="Warte auf Zeichen...", font=("Georgia", 14, "italic"))
-        self.lbl_status.pack(pady=15)
+        # Oben: Controls
+        top_frame = ttk.Frame(self.tab_status)
+        top_frame.pack(fill="x", pady=10, padx=10)
+        
+        self.lbl_status = ttk.Label(top_frame, text="Warte auf Zeichen...", font=("Georgia", 14, "italic"))
+        self.lbl_status.pack(side="left")
+        
+        btn = tk.Button(top_frame, text="Macht entfesseln (Scan)", command=self.run_once_manual, bg=COLOR_ACCENT_RED, fg=COLOR_TEXT_GOLD, font=FONT_BOLD)
+        btn.pack(side="right")
 
-        self.txt_preview = tk.Text(self.tab_status, bg=COLOR_INPUT_BG, fg="#e0d5c1", font=("Georgia", 13), relief="flat", height=15, padx=10, pady=10)
-        self.txt_preview.pack(fill="both", expand=True, padx=20)
+        # Mitte: Text (Nimmt viel Platz ein)
+        text_frame = ttk.Frame(self.tab_status)
+        text_frame.pack(fill="both", expand=True, padx=20, pady=5)
+        
+        ttk.Label(text_frame, text="Erkannte Runen:", style="Header.TLabel").pack(anchor="w")
+        self.txt_preview = tk.Text(text_frame, bg=COLOR_INPUT_BG, fg="#e0d5c1", font=("Georgia", 12), relief="flat", height=8, padx=10, pady=10)
+        self.txt_preview.pack(fill="both", expand=True)
         self.txt_preview.insert("1.0", "\n   Noch wurde kein Text entrissen...\n")
         self.txt_preview.config(state="disabled")
 
-        btn = tk.Button(self.tab_status, text="Macht entfesseln (Scan)", command=self.run_once_manual, bg=COLOR_ACCENT_RED, fg=COLOR_TEXT_GOLD, font=FONT_BOLD)
-        btn.pack(pady=20, ipadx=20, ipady=5)
+        # Unten: Debug Bilder (Feste Höhe)
+        debug_frame = ttk.Frame(self.tab_status)
+        debug_frame.pack(fill="x", padx=20, pady=10)
+        
+        # Linkes Bild: Detection
+        f1 = ttk.Frame(debug_frame); f1.pack(side="left", expand=True, fill="both", padx=(0,5))
+        ttk.Label(f1, text="Das Blickfeld (Erkennung):").pack(anchor="w")
+        self.lbl_debug_1 = tk.Label(f1, bg="black", text="Kein Bild", fg="gray", height=12) # Height in Textzeilen ca 200px
+        self.lbl_debug_1.pack(fill="both", expand=True)
+
+        # Rechtes Bild: OCR
+        f2 = ttk.Frame(debug_frame); f2.pack(side="right", expand=True, fill="both", padx=(5,0))
+        ttk.Label(f2, text="Die Lesung (Filter):").pack(anchor="w")
+        self.lbl_debug_2 = tk.Label(f2, bg="black", text="Kein Bild", fg="gray", height=12)
+        self.lbl_debug_2.pack(fill="both", expand=True)
+
+    def load_debug_images(self):
+        """Lädt die Bilder und zeigt sie im UI an."""
+        def load_img(path, label):
+            if os.path.exists(path):
+                try:
+                    img = Image.open(path)
+                    # Maximalhöhe begrenzen damit UI nicht platzt (z.B. 200px)
+                    target_h = 200
+                    aspect = img.width / img.height
+                    target_w = int(target_h * aspect)
+                    
+                    img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    label.config(image=photo, text="", height=0, width=0) # Reset text dimensions
+                    return photo
+                except: pass
+            return None
+
+        # Speichern in self damit Garbage Collector sie nicht löscht
+        p1 = load_img("debug_detection_view.png", self.lbl_debug_1)
+        if p1: self.debug_photo_1 = p1
+        
+        p2 = load_img("debug_ocr_input.png", self.lbl_debug_2)
+        if p2: self.debug_photo_2 = p2
 
     # --- TAB 2: KALIBRIERUNG ---
     def setup_calibration_tab(self):
@@ -188,7 +212,6 @@ class LotroApp:
         h_scroll.pack(side="bottom", fill="x")
         self.calib_canvas.pack(side="left", fill="both", expand=True)
         
-        # BINDINGS FÜR MAUS-EVENTS
         self.calib_canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.calib_canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.calib_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
@@ -217,140 +240,83 @@ class LotroApp:
 
         tk.Button(frame_controls, text="Speichern & Testen", command=self.save_and_test_ocr, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=20)
 
-    # --- MAUS LOGIK (Überarbeitet & Robust) ---
     def on_mouse_down(self, event):
-        # Klick-Koordinaten im Canvas-System (wichtig bei Scrollbars!)
-        cx = self.calib_canvas.canvasx(event.x)
-        cy = self.calib_canvas.canvasy(event.y)
-        
-        # Finde ALLE Objekte an dieser Stelle (liefert IDs)
-        # Wir suchen einen kleinen Bereich um den Klick herum (Toleranz)
-        clicked_items = self.calib_canvas.find_overlapping(cx-2, cy-2, cx+2, cy+2)
-        
-        if not clicked_items:
-            print("Klick ins Leere.")
-            return
-
-        # Wir müssen das oberste Objekt finden, das zu einem unserer Rects gehört
-        # Wir iterieren rückwärts (oberste items zuerst)
-        for item_id in reversed(clicked_items):
-            tags = self.calib_canvas.gettags(item_id)
-            if not tags: continue
-            
-            # Prüfen, ob wir ein Handle oder einen Rahmen getroffen haben
-            for name, rect in self.template_rects.items():
-                if rect.tag_handle in tags:
-                    print(f"Resize Handle von {name} getroffen!")
-                    self.active_rect = rect
-                    self.action_mode = 'resize'
-                    self.last_mouse = (cx, cy)
-                    rect.highlight(True)
-                    return
-                elif rect.tag_rect in tags or rect.tag_root in tags:
-                    print(f"Rahmen von {name} getroffen!")
-                    self.active_rect = rect
-                    self.action_mode = 'move'
-                    self.last_mouse = (cx, cy)
-                    rect.highlight(True)
-                    return
+        if not self.calib_img_raw is None:
+            cx = self.calib_canvas.canvasx(event.x)
+            cy = self.calib_canvas.canvasy(event.y)
+            clicked_items = self.calib_canvas.find_overlapping(cx-2, cy-2, cx+2, cy+2)
+            if not clicked_items: return
+            for item_id in reversed(clicked_items):
+                tags = self.calib_canvas.gettags(item_id)
+                if not tags: continue
+                for name, rect in self.template_rects.items():
+                    if rect.tag_handle in tags:
+                        self.active_rect = rect; self.action_mode = 'resize'; self.last_mouse = (cx, cy)
+                        rect.highlight(True); return
+                    elif rect.tag_rect in tags or rect.tag_root in tags:
+                        self.active_rect = rect; self.action_mode = 'move'; self.last_mouse = (cx, cy)
+                        rect.highlight(True); return
 
     def on_mouse_drag(self, event):
         if self.active_rect and self.action_mode:
             cx = self.calib_canvas.canvasx(event.x)
             cy = self.calib_canvas.canvasy(event.y)
-            
-            dx = cx - self.last_mouse[0]
-            dy = cy - self.last_mouse[1]
-            
-            if self.action_mode == 'move':
-                self.active_rect.move(dx, dy)
-            elif self.action_mode == 'resize':
-                # Neue Breite/Höhe berechnen
-                new_w = self.active_rect.w + dx
-                new_h = self.active_rect.h + dy
-                self.active_rect.resize(new_w, new_h)
-            
+            dx = cx - self.last_mouse[0]; dy = cy - self.last_mouse[1]
+            if self.action_mode == 'move': self.active_rect.move(dx, dy)
+            elif self.action_mode == 'resize': self.active_rect.resize(self.active_rect.w + dx, self.active_rect.h + dy)
             self.last_mouse = (cx, cy)
 
     def on_mouse_up(self, event):
-        if self.active_rect:
-            self.active_rect.highlight(False) # Highlight aus
-            print("Drag beendet.")
-        self.active_rect = None
-        self.action_mode = None
+        if self.active_rect: self.active_rect.highlight(False)
+        self.active_rect = None; self.action_mode = None
 
     def take_calibration_screenshot(self):
-        self.root.iconify()
-        self.root.after(3000, self._do_screenshot)
+        self.root.iconify(); self.root.after(3000, self._do_screenshot)
 
     def _do_screenshot(self):
         with mss.mss() as sct:
-            try:
-                mon_idx = int(self.cmb_monitor.get())
+            try: mon_idx = int(self.cmb_monitor.get())
             except: mon_idx = 1
             if mon_idx < 1 or mon_idx >= len(sct.monitors): mon_idx = 1
             
             sct_img = sct.grab(sct.monitors[mon_idx])
             img = np.array(sct_img)
             self.calib_img_raw = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-            
             img_rgb = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2RGB)
             im_pil = Image.fromarray(img_rgb)
             self.calib_photo = ImageTk.PhotoImage(im_pil)
-
             self.calib_canvas.config(scrollregion=(0,0, im_pil.width, im_pil.height))
             self.calib_canvas.delete("all")
             self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
-            
         self.root.deiconify()
         self.spawn_default_rects()
         messagebox.showinfo("Bereit", "Verschiebe nun die goldenen Rahmen.")
 
     def spawn_default_rects(self):
-        if self.calib_img_raw is None: 
-            print("Kein Bild für Rects vorhanden.")
-            return
-            
-        self.template_rects = {} # Reset
-        # Achtung: Canvas nicht komplett löschen, sonst ist das Bild weg!
-        # Wir löschen nur alte Items die mit 'item_' beginnen (unsere Tags)
-        # Einfacher: wir wissen, dass create_image als erstes kam. Alles danach kann weg.
-        # Aber sicher ist sicher: Wir löschen per Tag.
+        if self.calib_img_raw is None: return
+        self.template_rects = {} 
         self.calib_canvas.delete("all")
         self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
-
         h, w = self.calib_img_raw.shape[:2]
-        size = 40
-        mid_x, mid_y = w // 2, h // 2
-        
-        # Erstelle 4 neue DraggableRects
+        size = 40; mid_x, mid_y = w // 2, h // 2
         self.template_rects["top_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y - 150, size, "top_left", "Oben Links")
         self.template_rects["top_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y - 150, size, "top_right", "Oben Rechts")
         self.template_rects["bottom_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y + 150, size, "bottom_left", "Unten Links")
         self.template_rects["bottom_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y + 150, size, "bottom_right", "Unten Rechts")
-        print("4 Rahmen erstellt.")
 
     def save_templates_from_rects(self):
         if not self.calib_img_raw is None and len(self.template_rects) == 4:
             try:
                 template_dir = "templates"
                 if not os.path.exists(template_dir): os.makedirs(template_dir)
-                
                 img_gray = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2GRAY)
-                
                 for name, rect in self.template_rects.items():
                     x, y, w, h = int(rect.x), int(rect.y), int(rect.w), int(rect.h)
-                    x = max(0, x); y = max(0, y)
-                    w = min(w, img_gray.shape[1] - x)
-                    h = min(h, img_gray.shape[0] - y)
-                    
-                    crop = img_gray[y:y+h, x:x+w]
-                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), crop)
-                
+                    x = max(0, x); y = max(0, y); w = min(w, img_gray.shape[1] - x); h = min(h, img_gray.shape[0] - y)
+                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), img_gray[y:y+h, x:x+w])
                 self.engine.ocr_extractor.templates = self.engine.ocr_extractor._load_templates()
-                messagebox.showinfo("Erfolg", "Templates gespeichert! Die Fadenkreuze sind nun die Ankerpunkte.")
-            except Exception as e:
-                messagebox.showerror("Fehler", str(e))
+                messagebox.showinfo("Erfolg", "Templates gespeichert!")
+            except Exception as e: messagebox.showerror("Fehler", str(e))
 
     def save_and_test_ocr(self):
         cfg = self.engine.config
@@ -364,9 +330,12 @@ class LotroApp:
             
             txt = self.engine.run_pipeline(skip_audio=True)
             self.update_ui_text(f"--- TESTERGEBNIS (Audio stumm) ---\n{txt}")
+            
+            # Bilder aktualisieren
+            self.load_debug_images()
+            
             self.notebook.select(self.tab_status)
-        except Exception as e:
-            messagebox.showerror("Fehler", str(e))
+        except Exception as e: messagebox.showerror("Fehler", str(e))
 
     # --- TAB 3: EINSTELLUNGEN ---
     def setup_settings_tab(self):
@@ -426,23 +395,12 @@ class LotroApp:
 
     def register_hotkey(self):
         hk = self.engine.config.get("hotkey", "ctrl+alt+s")
-        
-        # 1. Alles löschen
         try: keyboard.unhook_all_hotkeys()
         except: pass
-
-        # 2. Hotkey binden
-        try:
-            self.hotkey_hook = keyboard.add_hotkey(hk, lambda: self.root.after(0, self.run_once_manual))
-        except: 
-            log_message(f"Fehler bei Hotkey {hk}")
-
-        # 3. Media Taste
-        try:
-            keyboard.add_hotkey("play/pause media", lambda: self.engine.tts_service.toggle_pause())
-            log_message("Media Taste gebunden.")
-        except: 
-            pass
+        try: self.hotkey_hook = keyboard.add_hotkey(hk, lambda: self.root.after(0, self.run_once_manual))
+        except: log_message(f"Fehler bei Hotkey {hk}")
+        try: keyboard.add_hotkey("play/pause media", lambda: self.engine.tts_service.toggle_pause())
+        except: pass
 
     def run_once_manual(self):
         self.lbl_status.config(text="Das Auge sieht...", foreground=COLOR_TEXT_GOLD)
@@ -455,6 +413,10 @@ class LotroApp:
                 self.root.after(0, lambda: self.update_status("Kein Text.", error=True))
                 return
             self.root.after(0, lambda: self.update_ui_text(txt))
+            
+            # WICHTIG: Bilder im Hauptthread laden, da Tkinter das im Thread nicht mag
+            self.root.after(0, lambda: self.load_debug_images()) 
+            
             self.root.after(0, lambda: self.update_status("Fertig.", done=True))
         except Exception as e:
             self.root.after(0, lambda: self.update_status(f"Fehler: {e}", error=True))
