@@ -114,6 +114,7 @@ class LotroApp:
             if items:
                 for i in reversed(items):
                     tags = self.calib_canvas.gettags(i)
+                    if not tags: continue
                     for n, r in self.template_rects.items():
                         if r.tag_handle in tags: self.active_rect=r; self.action_mode='resize'; self.last_mouse=(cx,cy); r.highlight(True); return
                         elif r.tag_rect in tags or r.tag_root in tags: self.active_rect=r; self.action_mode='move'; self.last_mouse=(cx,cy); r.highlight(True); return
@@ -163,22 +164,30 @@ class LotroApp:
             c["padding_top"]=int(self.spin_top.get()); c["padding_bottom"]=int(self.spin_bottom.get())
             c["padding_left"]=int(self.spin_left.get()); c["padding_right"]=int(self.spin_right.get())
             save_config(c); self.engine.ocr_extractor.config = c
-            
-            # --- UPDATE: Tuple return ---
             txt, src = self.engine.run_pipeline(skip_audio=True)
-            self.update_ui_text(f"--- TEST ({src}) ---\n{txt}")
-            
-            self.load_debug_images(); self.notebook.select(self.tab_status)
+            self.update_ui_text(f"--- TEST ({src}) ---\n{txt}"); self.load_debug_images(); self.notebook.select(self.tab_status)
         except Exception as e: messagebox.showerror("Fehler", str(e))
 
+    # --- TAB 3: EINSTELLUNGEN ---
     def setup_settings_tab(self):
         sf = ttk.Frame(self.tab_settings); sf.pack(fill="both", expand=True, padx=20, pady=20)
         ttk.Label(sf, text="Die Stimme (ElevenLabs API Key)", style="Header.TLabel").pack(anchor="w")
         self.ent_api_key = self.create_entry(sf, show="*"); self.ent_api_key.pack(fill="x", pady=5)
+        
+        # --- UPDATE: MODEL DROPDOWN ---
         ttk.Label(sf, text="Der Gelehrte (Google Gemini AI OCR)", style="Header.TLabel").pack(anchor="w", pady=(15,0))
         ttk.Label(sf, text="API Key:").pack(anchor="w"); self.ent_gemini_key = self.create_entry(sf, show="*"); self.ent_gemini_key.pack(fill="x", pady=5)
         self.var_use_ai = tk.BooleanVar()
         tk.Checkbutton(sf, text="Nutze Google Gemini AI statt Tesseract", variable=self.var_use_ai, bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_BG_DARK).pack(anchor="w", pady=5)
+        
+        # Modell-Auswahl
+        frm_mdl = ttk.Frame(sf); frm_mdl.pack(fill="x", pady=5)
+        ttk.Label(frm_mdl, text="Modell wählen:").pack(side="left")
+        self.cmb_gemini_model = ttk.Combobox(frm_mdl, values=["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-2.0-flash-exp"], width=30, state="readonly")
+        self.cmb_gemini_model.pack(side="left", padx=5)
+        tk.Button(frm_mdl, text="⟳ Laden", command=self.fetch_gemini_models, bg=COLOR_TEXT_DIM, fg="white", font=("Arial", 8)).pack(side="left")
+        # ------------------------------
+
         ttk.Label(sf, text="Das Auge (Tesseract Pfad)", style="Header.TLabel").pack(anchor="w", pady=(15,0))
         self.ent_tesseract = self.create_entry(sf); self.ent_tesseract.pack(fill="x", pady=5)
         ttk.Label(sf, text="Monitor ID", style="Header.TLabel").pack(anchor="w", pady=(15,0)); self.cmb_monitor = ttk.Combobox(sf, values=["1", "2", "3"], state="readonly"); self.cmb_monitor.pack(fill="x", pady=5)
@@ -186,9 +195,33 @@ class LotroApp:
         self.var_debug = tk.BooleanVar(); tk.Checkbutton(sf, text="Debug Modus", variable=self.var_debug, bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_BG_DARK).pack(anchor="w", pady=15)
         tk.Button(sf, text="Einstellungen Speichern", command=self.save_settings, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=20)
 
+    def fetch_gemini_models(self):
+        key = self.ent_gemini_key.get().strip()
+        if not key:
+            messagebox.showerror("Fehler", "Bitte erst einen API Key eingeben.")
+            return
+        
+        self.lbl_status.config(text="Frage Gelehrten...", foreground=COLOR_TEXT_GOLD)
+        try:
+            # Direktzugriff auf ocr_service Methode (muss importiert werden)
+            models = self.engine.ocr_extractor.fetch_available_models(key)
+            if models:
+                self.cmb_gemini_model['values'] = models
+                self.cmb_gemini_model.set(models[0])
+                messagebox.showinfo("Erfolg", f"{len(models)} Modelle gefunden.")
+            else:
+                messagebox.showwarning("Info", "Keine passenden Modelle gefunden (oder Key falsch).")
+        except Exception as e:
+            messagebox.showerror("Fehler", str(e))
+        self.lbl_status.config(text="Bereit", foreground=COLOR_TEXT_GOLD)
+
     def load_settings_to_ui(self):
         c = self.engine.config; self.ent_api_key.insert(0, c.get("api_key", ""))
         self.ent_gemini_key.insert(0, c.get("gemini_api_key", "")); self.var_use_ai.set(c.get("use_ai_ocr", False))
+        
+        # Modell laden
+        self.cmb_gemini_model.set(c.get("gemini_model_name", "models/gemini-1.5-flash"))
+        
         self.ent_tesseract.insert(0, c.get("tesseract_path", "")); self.ent_hotkey.insert(0, c.get("hotkey", "ctrl+alt+s"))
         self.cmb_monitor.set(str(c.get("monitor_index", 1))); self.var_debug.set(c.get("debug_mode", False))
         self.spin_top.delete(0, "end"); self.spin_top.insert(0, c.get("padding_top", 10))
@@ -199,11 +232,17 @@ class LotroApp:
     def save_settings(self):
         c = self.engine.config; c["api_key"] = self.ent_api_key.get().strip()
         c["gemini_api_key"] = self.ent_gemini_key.get().strip(); c["use_ai_ocr"] = self.var_use_ai.get()
+        c["gemini_model_name"] = self.cmb_gemini_model.get().strip() # NEU
+        
         c["tesseract_path"] = self.ent_tesseract.get().strip(); c["hotkey"] = self.ent_hotkey.get().strip()
         try: c["monitor_index"] = int(self.cmb_monitor.get()); c["debug_mode"] = self.var_debug.get()
         except: pass
         save_config(c); self.engine.config = c; self.engine.ocr_extractor.config = c
         self.engine.ocr_extractor.pytesseract.pytesseract.tesseract_cmd = c["tesseract_path"]
+        
+        # KI neu init mit neuem Modell
+        self.engine.ocr_extractor._setup_ai()
+        
         self.register_hotkey(); messagebox.showinfo("Gespeichert", "Einstellungen übernommen.")
 
     def register_hotkey(self):
@@ -221,7 +260,6 @@ class LotroApp:
 
     def process_pipeline(self):
         try:
-            # --- UPDATE: Tuple return ---
             txt, src = self.engine.run_pipeline()
             if not txt:
                 self.root.after(0, lambda: self.update_status("Kein Text.", error=True))
