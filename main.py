@@ -12,7 +12,7 @@ from utils import save_config, log_message
 
 # --- LOTRO THEME COLORS ---
 COLOR_BG_DARK = "#1a1110"
-COLOR_BG_PANEL = "#2b221b"
+COLOR_BG_PANEL = "#2b221b"      # <--- Korrekter Name
 COLOR_TEXT_GOLD = "#c5a059"
 COLOR_TEXT_DIM = "#8c7b70"
 COLOR_ACCENT_RED = "#5c1815"
@@ -265,7 +265,6 @@ class LotroApp:
 
         self.create_lotro_button(frame_controls, "Speichern & Testen", self.save_and_test_ocr, color=COLOR_TEXT_GOLD).pack(fill="x", pady=30)
 
-    # --- MAUS LOGIK ---
     def on_mouse_down(self, event):
         if not self.calib_img_raw is None:
             cx = self.calib_canvas.canvasx(event.x)
@@ -386,7 +385,6 @@ class LotroApp:
             save_config(cfg)
             self.engine.ocr_extractor.config = cfg
             
-            # --- HIER WAR DER FEHLER: JETZT SAUBER ---
             txt, src = self.engine.run_pipeline(skip_audio=True)
             self.update_ui_text(f"--- TEST ({src}) ---\n{txt}")
             
@@ -410,21 +408,22 @@ class LotroApp:
         self.ent_gemini_key = self.create_entry(sf, show="*")
         self.ent_gemini_key.pack(fill="x", pady=5)
         
+        # Checkbox & Modell
         frm_ai = ttk.Frame(sf)
         frm_ai.pack(fill="x", pady=5)
         self.var_use_ai = tk.BooleanVar()
         tk.Checkbutton(frm_ai, text="Nutze Google Gemini AI statt Tesseract", variable=self.var_use_ai, 
-                       bg=COLOR_PANEL_BG, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
-                       activebackground=COLOR_PANEL_BG, activeforeground=COLOR_TEXT_GOLD).pack(side="left")
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
+                       activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(side="left")
         
         frm_mdl = ttk.Frame(sf)
         frm_mdl.pack(fill="x", pady=2)
         ttk.Label(frm_mdl, text="Modell:").pack(side="left")
         self.cmb_gemini_model = ttk.Combobox(frm_mdl, 
-                                             values=["models/gemini-2.0-flash", "models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-2.0-flash-exp"], 
+                                             values=["models/gemini-2.5-flash", "models/gemini-2.0-flash", "models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-2.0-flash-exp"], 
                                              width=30, state="readonly")
         self.cmb_gemini_model.pack(side="left", padx=10)
-        self.create_lotro_button(frm_mdl, "Laden", self.fetch_gemini_models, color=COLOR_PANEL_BG).pack(side="left")
+        self.create_lotro_button(frm_mdl, "Laden", self.fetch_gemini_models, color=COLOR_BG_PANEL).pack(side="left")
 
         ttk.Label(sf, text="Das Auge (Tesseract & Monitor)", style="Header.TLabel").pack(anchor="w", pady=(20,0))
         f_tess = ttk.Frame(sf)
@@ -442,8 +441,8 @@ class LotroApp:
         
         self.var_debug = tk.BooleanVar()
         tk.Checkbutton(sf, text="Visionen aufzeichnen (Debug)", variable=self.var_debug, 
-                       bg=COLOR_PANEL_BG, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
-                       activebackground=COLOR_PANEL_BG, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w", pady=15)
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
+                       activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w", pady=15)
         
         self.create_lotro_button(sf, "In Stein meißeln (Speichern)", self.save_settings, color=COLOR_TEXT_GOLD).pack(fill="x", pady=30)
 
@@ -469,7 +468,6 @@ class LotroApp:
         self.ent_gemini_key.insert(0, c.get("gemini_api_key", ""))
         self.var_use_ai.set(c.get("use_ai_ocr", False))
         
-        # Standard: 1.5-flash
         self.cmb_gemini_model.set(c.get("gemini_model_name", "models/gemini-1.5-flash"))
         
         self.ent_tesseract.insert(0, c.get("tesseract_path", ""))
@@ -501,7 +499,7 @@ class LotroApp:
         self.engine.ocr_extractor.config = c
         self.engine.ocr_extractor.pytesseract.pytesseract.tesseract_cmd = c["tesseract_path"]
         
-        self.engine.ocr_extractor._setup_ai() # Reload AI Model
+        self.engine.ocr_extractor._setup_ai() 
         
         self.register_hotkey()
         messagebox.showinfo("Gespeichert", "Einstellungen wurden übernommen.")
