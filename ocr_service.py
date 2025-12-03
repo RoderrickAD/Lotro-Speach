@@ -4,78 +4,70 @@ import numpy as np
 import mss 
 import mss.tools 
 import os
+import google.generativeai as genai
+from PIL import Image
 from utils import log_message
 
 class OCRExtractor:
     def __init__(self, config):
         self.config = config
         
+        # Tesseract Init
         tess_path = self.config.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
         pytesseract.pytesseract.tesseract_cmd = tess_path
         
+        # Gemini Init (wird bei jedem Run geprüft, falls Key sich ändert)
+        self.ai_model = None
+        self._setup_ai()
+
         self.templates = self._load_templates()
+
+    def _setup_ai(self):
+        """Konfiguriert die KI, falls ein Key da ist."""
+        key = self.config.get("gemini_api_key", "").strip()
+        if key:
+            try:
+                genai.configure(api_key=key)
+                self.ai_model = genai.GenerativeModel('gemini-1.5-flash')
+            except Exception as e:
+                log_message(f"Fehler bei KI-Start: {e}")
 
     def _load_templates(self):
         template_dir = os.path.join(os.getcwd(), "templates")
         templates = {}
-        template_names = {
-            "top_left": "top_left.png",
-            "top_right": "top_right.png",
-            "bottom_right": "bottom_right.png",
-            "bottom_left": "bottom_left.png"
-        }
-
+        names = ["top_left", "top_right", "bottom_right", "bottom_left"]
         if not os.path.exists(template_dir): return None
-
         success = True
-        for key, filename in template_names.items():
-            filepath = os.path.join(template_dir, filename)
-            if os.path.exists(filepath):
-                templates[key] = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE) 
-            else:
-                success = False
-        
-        if success and len(templates) == 4:
-            return templates
-        else:
-            return None
+        for name in names:
+            fp = os.path.join(template_dir, f"{name}.png")
+            if os.path.exists(fp): templates[name] = cv2.imread(fp, cv2.IMREAD_GRAYSCALE) 
+            else: success = False
+        return templates if (success and len(templates) == 4) else None
     
     def get_monitor_screenshot(self):
         try:
             mon_idx = int(self.config.get("monitor_index", 1))
-        except ValueError: mon_idx = 1
-            
+        except: mon_idx = 1
         try:
             with mss.mss() as sct:
-                if mon_idx >= len(sct.monitors) or mon_idx < 1: mon_idx = 1 
-                monitor = sct.monitors[mon_idx]
-                sct_img = sct.grab(monitor)
-                img = np.array(sct_img)
-                img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                return img
-        except Exception as e:
-            log_message(f"Screenshot Fehler: {e}")
-            return None
+                if mon_idx >= len(sct.monitors): mon_idx = 1
+                return cv2.cvtColor(np.array(sct.grab(sct.monitors[mon_idx])), cv2.COLOR_BGRA2BGR)
+        except: return None
 
+    # --- TESSERACT HELFER ---
     def isolate_text_colors(self, img):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        lower_yellow = np.array([15, 70, 70])
-        upper_yellow = np.array([35, 255, 255])
-        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        lower_white = np.array([0, 0, 140])      
-        upper_white = np.array([180, 50, 255])   
-        mask_white = cv2.inRange(hsv, lower_white, upper_white)
-        combined_mask = cv2.bitwise_or(mask_yellow, mask_white)
-        final_image = cv2.bitwise_not(combined_mask)
-        return final_image
+        mask_yellow = cv2.inRange(hsv, np.array([15, 70, 70]), np.array([35, 255, 255]))
+        mask_white = cv2.inRange(hsv, np.array([0, 0, 140]), np.array([180, 50, 255]))
+        return cv2.bitwise_not(cv2.bitwise_or(mask_yellow, mask_white))
 
     def crop_to_text_content(self, binary_img):
         inverted = cv2.bitwise_not(binary_img)
         contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: return binary_img 
-
-        min_x = binary_img.shape[1]; min_y = binary_img.shape[0]
-        max_x = 0; max_y = 0
+        
+        min_x, min_y = binary_img.shape[1], binary_img.shape[0]
+        max_x = max_y = 0
         found = False
         for c in contours:
             if cv2.contourArea(c) < 50: continue
@@ -83,119 +75,126 @@ class OCRExtractor:
             min_x = min(min_x, x); min_y = min(min_y, y)
             max_x = max(max_x, x + w); max_y = max(max_y, y + h)
             found = True
-
-        if not found: return binary_img
         
+        if not found: return binary_img
         pad = 10
-        min_x = max(0, min_x - pad); min_y = max(0, min_y - pad)
-        max_x = min(binary_img.shape[1], max_x + pad); max_y = min(binary_img.shape[0], max_y + pad)
-        return binary_img[min_y:max_y, min_x:max_x]
+        return binary_img[max(0, min_y-pad):min(binary_img.shape[0], max_y+pad), 
+                          max(0, min_x-pad):min(binary_img.shape[1], max_x+pad)]
 
     def find_text_region(self, img):
         h_img, w_img = img.shape[:2]
         if self.templates is None: return None, None
 
-        gray_screenshot = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        found_positions = {}
-        threshold = 0.60 
-
-        for key, template_img in self.templates.items():
-            res = cv2.matchTemplate(gray_screenshot, template_img, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-            if max_val >= threshold: found_positions[key] = max_loc 
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        positions = {}
+        for key, templ in self.templates.items():
+            res = cv2.matchTemplate(gray, templ, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if max_val >= 0.60: positions[key] = max_loc 
             else: return None, None
 
-        if len(found_positions) < 4: return None, None
+        if len(positions) < 4: return None, None
 
         try:
-            # Wir berechnen die MITTE der gefundenen Templates (Fadenkreuz-Logik)
-            # max_loc ist die Oben-Links Koordinate des Matches
+            # Center Berechnung
+            def get_c(k, p): return p[0] + self.templates[k].shape[1]//2, p[1] + self.templates[k].shape[0]//2
             
-            # Helper für Center-Calculation
-            def get_center(key, top_left_pos):
-                h, w = self.templates[key].shape
-                return int(top_left_pos[0] + w/2), int(top_left_pos[1] + h/2)
+            c_tl = get_c("top_left", positions["top_left"])
+            c_tr = get_c("top_right", positions["top_right"])
+            c_bl = get_c("bottom_left", positions["bottom_left"])
+            c_br = get_c("bottom_right", positions["bottom_right"])
 
-            center_tl = get_center("top_left", found_positions["top_left"])
-            center_tr = get_center("top_right", found_positions["top_right"])
-            center_bl = get_center("bottom_left", found_positions["bottom_left"])
-            center_br = get_center("bottom_right", found_positions["bottom_right"])
+            pt = int(self.config.get("padding_top", 10))
+            pb = int(self.config.get("padding_bottom", 20))
+            pl = int(self.config.get("padding_left", 10))
+            pr = int(self.config.get("padding_right", 50))
 
-            # Wir nehmen die Center-Punkte als die exakten Eck-Koordinaten des Textfeldes
-            final_x1 = min(center_tl[0], center_bl[0])
-            final_y1 = min(center_tl[1], center_tr[1])
-            final_x2 = max(center_tr[0], center_br[0])
-            final_y2 = max(center_bl[1], center_br[1])
+            x1 = max(0, int(min(c_tl[0], c_bl[0]) - pl))
+            y1 = max(0, int(min(c_tl[1], c_tr[1]) - pt))
+            x2 = min(w_img, int(max(c_tr[0], c_br[0]) + pr))
+            y2 = min(h_img, int(max(c_bl[1], c_br[1]) + pb))
+
+            if (x2-x1) < 50 or (y2-y1) < 50: return None, None
+            return img[y1:y2, x1:x2], (x1, y1, x2-x1, y2-y1)
+        except: return None, None
+
+    # --- KI LOGIK ---
+    def run_ai_recognition(self, img_crop):
+        if not self.ai_model: 
+            self._setup_ai() # Versuch neu zu laden
+            if not self.ai_model: return "Fehler: Kein Gemini API Key konfiguriert."
+
+        try:
+            # Konvertierung für KI
+            rgb_img = cv2.cvtColor(img_crop, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb_img)
+
+            prompt = """
+            Du bist ein Vorleser für ein RPG Spiel.
+            Lies den Text aus diesem Bildausschnitt.
+            - Gib NUR den Text zurück, keine Einleitung.
+            - Ignoriere Interface-Elemente.
+            - Achte penibel auf deutsche Umlaute.
+            - Korrigiere offensichtliche OCR-Fehler (z.B. 'L0TRO' -> 'LOTRO').
+            """
             
-            # --- PADDING ---
-            pad_top = int(self.config.get("padding_top", 10))
-            pad_bottom = int(self.config.get("padding_bottom", 20))
-            pad_left = int(self.config.get("padding_left", 10))
-            pad_right = int(self.config.get("padding_right", 50)) 
-
-            final_x1 = max(0, final_x1 - pad_left)
-            final_y1 = max(0, final_y1 - pad_top)
-            final_x2 = min(w_img, final_x2 + pad_right)
-            final_y2 = min(h_img, final_y2 + pad_bottom)
-
-            w_final = final_x2 - final_x1
-            h_final = final_y2 - final_y1
-
-            dialog_region = img[final_y1:final_y2, final_x1:final_x2]
-            
-            if w_final < 50 or h_final < 50: return None, None
-            
-            return dialog_region, (final_x1, final_y1, w_final, h_final)
+            response = self.ai_model.generate_content([prompt, pil_img])
+            return response.text.strip()
         except Exception as e:
-            log_message(f"Fehler bei Template-Berechnung: {e}")
-            return None, None
+            log_message(f"KI Anfrage fehlgeschlagen: {e}")
+            return "Fehler bei der KI-Verbindung."
 
+    # --- HAUPTFUNKTION ---
     def run_ocr(self):
         img = self.get_monitor_screenshot()
         if img is None: return "Kein Text gefunden"
 
+        # 1. IMMER den Ausschnitt finden (Template Matching)
         cropped_img, coords = self.find_text_region(img)
+        
         if cropped_img is None:
             log_message("Kein Dialog-Template erkannt.")
             return "Kein Text gefunden"
 
         if self.config.get("debug_mode", False):
-            try: 
+            try:
                 (x, y, w, h) = coords
                 debug_full = img.copy()
-                cv2.rectangle(debug_full, (x, y), (x + w, y + h), (0, 0, 255), 3) 
+                cv2.rectangle(debug_full, (x, y), (x+w, y+h), (0, 255, 0), 3)
                 cv2.imwrite("debug_detection_view.png", debug_full)
+                cv2.imwrite("debug_ocr_input.png", cropped_img) # Raw crop für Debug
             except: pass
 
-        processed_img = self.isolate_text_colors(cropped_img)
-        processed_img = self.crop_to_text_content(processed_img)
-        processed_img = cv2.resize(processed_img, None, fx=4.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
-        _, processed_img = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY)
-
-        if self.config.get("debug_mode", False):
-            try: cv2.imwrite("debug_ocr_input.png", processed_img)
-            except: pass
-
-        psm = self.config.get("ocr_psm", 6)
-        lang = self.config.get("ocr_language", "deu+eng") 
-        whitelist = self.config.get("ocr_whitelist", "")
+        # 2. ENTSCHEIDUNG: KI oder Tesseract?
+        use_ai = self.config.get("use_ai_ocr", False)
         
-        custom_config = f'--psm {psm} -c preserve_interword_spaces=1'
-        if whitelist and len(whitelist) > 5:
-            custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
-            
-        try:
-            txt = pytesseract.image_to_string(processed_img, lang=lang, config=custom_config)
-            result = txt.strip()
+        if use_ai:
+            log_message("Starte KI-Erkennung (Gemini Flash)...")
+            result = self.run_ai_recognition(cropped_img)
+        else:
+            # Tesseract Pipeline (Filter -> Crop -> Upscale)
+            processed_img = self.isolate_text_colors(cropped_img)
+            processed_img = self.crop_to_text_content(processed_img)
+            processed_img = cv2.resize(processed_img, None, fx=4.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
+            _, processed_img = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY)
             
             if self.config.get("debug_mode", False):
-                try:
-                    with open("debug_ocr_text.txt", "w", encoding="utf-8") as f:
-                        f.write(f"--- OCR ROHDATEN ---\nErgebnis:\n{result}")
+                try: cv2.imwrite("debug_ocr_input.png", processed_img)
                 except: pass
 
-            if not result: return "Kein Text gefunden"
-            return " ".join(result.split())
-        except Exception as e:
-            log_message(f"OCR Fehler: {e}")
-            return "Kein Text gefunden"
+            psm = self.config.get("ocr_psm", 6)
+            lang = self.config.get("ocr_language", "deu+eng")
+            custom_config = f'--psm {psm} -c preserve_interword_spaces=1'
+            whitelist = self.config.get("ocr_whitelist", "")
+            if whitelist and len(whitelist) > 5:
+                custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
+            
+            try:
+                txt = pytesseract.image_to_string(processed_img, lang=lang, config=custom_config)
+                result = " ".join(txt.strip().split())
+            except Exception as e:
+                log_message(f"Tesseract Fehler: {e}")
+                result = "Kein Text gefunden"
+
+        if not result: return "Kein Text gefunden"
+        return result
