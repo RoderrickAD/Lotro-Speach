@@ -20,13 +20,32 @@ class OCRExtractor:
         self.templates = self._load_templates()
 
     def _setup_ai(self):
+        """Initialisiert die KI mit Key und gewähltem Modell."""
         key = self.config.get("gemini_api_key", "").strip()
+        model_name = self.config.get("gemini_model_name", "models/gemini-1.5-flash") # Fallback
+        
         if key:
             try:
                 genai.configure(api_key=key)
-                self.ai_model = genai.GenerativeModel('gemini-1.5-flash')
+                self.ai_model = genai.GenerativeModel(model_name)
+                log_message(f"KI konfiguriert mit Modell: {model_name}")
             except Exception as e:
                 log_message(f"Fehler bei KI-Start: {e}")
+
+    def fetch_available_models(self, api_key):
+        """Fragt Google nach allen verfügbaren Modellen."""
+        try:
+            genai.configure(api_key=api_key)
+            models = []
+            for m in genai.list_models():
+                # Wir wollen nur Modelle, die Content generieren können (keine Embedding-Modelle)
+                if 'generateContent' in m.supported_generation_methods:
+                    models.append(m.name)
+            models.sort()
+            return models
+        except Exception as e:
+            log_message(f"Fehler beim Laden der Modell-Liste: {e}")
+            return []
 
     def _load_templates(self):
         template_dir = os.path.join(os.getcwd(), "templates")
@@ -99,12 +118,12 @@ class OCRExtractor:
         try:
             rgb_img = cv2.cvtColor(img_crop, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(rgb_img)
-            prompt = "Lies den Quest-Text aus diesem Bild. Gib NUR den Text zurück, ohne Einleitung. Ignoriere Interface-Elemente. Achte auf deutsche Umlaute."
+            prompt = "Lies den Quest-Text aus diesem Bild. Gib NUR den Text zurück, ohne Einleitung. Ignoriere Interface-Elemente. Achte penibel auf deutsche Umlaute."
             response = self.ai_model.generate_content([prompt, pil_img])
             return response.text.strip()
         except Exception as e:
             log_message(f"KI Anfrage fehlgeschlagen: {e}")
-            return "Fehler bei der KI-Verbindung."
+            return f"Fehler: {e}"
 
     def run_ocr(self):
         img = self.get_monitor_screenshot()
@@ -127,7 +146,7 @@ class OCRExtractor:
         use_ai = self.config.get("use_ai_ocr", False)
         
         if use_ai:
-            log_message("Starte KI-Erkennung...")
+            log_message(f"Starte KI-Erkennung ({self.config.get('gemini_model_name', 'Default')})...")
             return self.run_ai_recognition(cropped_img), "Gemini AI"
         else:
             processed_img = self.isolate_text_colors(cropped_img)
