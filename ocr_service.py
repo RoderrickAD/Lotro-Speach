@@ -59,15 +59,12 @@ class OCRExtractor:
 
     def isolate_text_colors(self, img):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        # Gelb/Gold
         lower_yellow = np.array([15, 70, 70])
         upper_yellow = np.array([35, 255, 255])
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        # Weiß/Silber
         lower_white = np.array([0, 0, 140])      
         upper_white = np.array([180, 50, 255])   
         mask_white = cv2.inRange(hsv, lower_white, upper_white)
-
         combined_mask = cv2.bitwise_or(mask_yellow, mask_white)
         final_image = cv2.bitwise_not(combined_mask)
         return final_image
@@ -75,13 +72,10 @@ class OCRExtractor:
     def crop_to_text_content(self, binary_img):
         inverted = cv2.bitwise_not(binary_img)
         contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
         if not contours: return binary_img 
 
-        min_x = binary_img.shape[1]
-        min_y = binary_img.shape[0]
-        max_x = 0
-        max_y = 0
+        min_x = binary_img.shape[1]; min_y = binary_img.shape[0]
+        max_x = 0; max_y = 0
         found = False
         for c in contours:
             if cv2.contourArea(c) < 50: continue
@@ -92,11 +86,9 @@ class OCRExtractor:
 
         if not found: return binary_img
         
-        # Kleines Sicherheits-Padding beim Auto-Crop
         pad = 10
         min_x = max(0, min_x - pad); min_y = max(0, min_y - pad)
         max_x = min(binary_img.shape[1], max_x + pad); max_y = min(binary_img.shape[0], max_y + pad)
-
         return binary_img[min_y:max_y, min_x:max_x]
 
     def find_text_region(self, img):
@@ -116,20 +108,30 @@ class OCRExtractor:
         if len(found_positions) < 4: return None, None
 
         try:
-            h_tr, w_tr = self.templates["top_right"].shape
-            h_br, w_br = self.templates["bottom_right"].shape
-            h_bl, w_bl = self.templates["bottom_left"].shape
-
-            final_x1 = min(found_positions["top_left"][0], found_positions["bottom_left"][0])
-            final_y1 = min(found_positions["top_left"][1], found_positions["top_right"][1])
-            final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
-            final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
+            # Wir berechnen die MITTE der gefundenen Templates (Fadenkreuz-Logik)
+            # max_loc ist die Oben-Links Koordinate des Matches
             
-            # --- DYNAMISCHES PADDING AUS CONFIG ---
+            # Helper für Center-Calculation
+            def get_center(key, top_left_pos):
+                h, w = self.templates[key].shape
+                return int(top_left_pos[0] + w/2), int(top_left_pos[1] + h/2)
+
+            center_tl = get_center("top_left", found_positions["top_left"])
+            center_tr = get_center("top_right", found_positions["top_right"])
+            center_bl = get_center("bottom_left", found_positions["bottom_left"])
+            center_br = get_center("bottom_right", found_positions["bottom_right"])
+
+            # Wir nehmen die Center-Punkte als die exakten Eck-Koordinaten des Textfeldes
+            final_x1 = min(center_tl[0], center_bl[0])
+            final_y1 = min(center_tl[1], center_tr[1])
+            final_x2 = max(center_tr[0], center_br[0])
+            final_y2 = max(center_bl[1], center_br[1])
+            
+            # --- PADDING ---
             pad_top = int(self.config.get("padding_top", 10))
             pad_bottom = int(self.config.get("padding_bottom", 20))
             pad_left = int(self.config.get("padding_left", 10))
-            pad_right = int(self.config.get("padding_right", 50)) # Standard erhöht
+            pad_right = int(self.config.get("padding_right", 50)) 
 
             final_x1 = max(0, final_x1 - pad_left)
             final_y1 = max(0, final_y1 - pad_top)
@@ -153,9 +155,10 @@ class OCRExtractor:
         if img is None: return "Kein Text gefunden"
 
         cropped_img, coords = self.find_text_region(img)
-        if cropped_img is None: return "Kein Text gefunden"
+        if cropped_img is None:
+            log_message("Kein Dialog-Template erkannt.")
+            return "Kein Text gefunden"
 
-        # Debug Bild: Detection View
         if self.config.get("debug_mode", False):
             try: 
                 (x, y, w, h) = coords
@@ -166,8 +169,6 @@ class OCRExtractor:
 
         processed_img = self.isolate_text_colors(cropped_img)
         processed_img = self.crop_to_text_content(processed_img)
-        
-        # Upscaling
         processed_img = cv2.resize(processed_img, None, fx=4.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
         _, processed_img = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY)
 
