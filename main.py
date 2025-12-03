@@ -279,11 +279,8 @@ class LotroApp:
             save_config(cfg)
             self.engine.ocr_extractor.config = cfg
             
-            # --- HIER IST DIE ÄNDERUNG: SKIP AUDIO = TRUE ---
             txt = self.engine.run_pipeline(skip_audio=True)
-            # ------------------------------------------------
-            
-            self.update_ui_text(f"--- TESTERGEBNIS (Audio stummgeschaltet) ---\n{txt}")
+            self.update_ui_text(f"--- TESTERGEBNIS (Audio stumm) ---\n{txt}")
             self.notebook.select(self.tab_status)
         except Exception as e:
             messagebox.showerror("Fehler", str(e))
@@ -346,12 +343,23 @@ class LotroApp:
 
     def register_hotkey(self):
         hk = self.engine.config.get("hotkey", "ctrl+alt+s")
-        if self.hotkey_hook:
-            try: keyboard.remove_hotkey(self.hotkey_hook)
-            except: pass
+        
+        # 1. Alles löschen
+        try: keyboard.unhook_all_hotkeys()
+        except: pass
+
+        # 2. Hotkey binden
         try:
             self.hotkey_hook = keyboard.add_hotkey(hk, lambda: self.root.after(0, self.run_once_manual))
-        except: pass
+        except: 
+            log_message(f"Fehler bei Hotkey {hk}")
+
+        # 3. Media Taste
+        try:
+            keyboard.add_hotkey("play/pause media", lambda: self.engine.tts_service.toggle_pause())
+            log_message("Media Taste gebunden.")
+        except: 
+            pass
 
     def run_once_manual(self):
         self.lbl_status.config(text="Das Auge sieht...", foreground=COLOR_TEXT_GOLD)
