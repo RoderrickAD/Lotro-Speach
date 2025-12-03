@@ -24,15 +24,14 @@ class CoreEngine:
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
         
-        # Starte Cache-Bereinigung asynchron (UX Verbesserung)
+        # Starte Cache-Bereinigung asynchron
         threading.Thread(target=self._clean_cache, daemon=True).start()
         
-        # Lade Stimmen beim Start (asynchron)
+        # Lade Stimmen beim Start
         threading.Thread(target=self.fetch_voices, daemon=True).start()
 
     def _clean_cache(self):
         """Löscht die ältesten Dateien, wenn der Cache die MAX_CACHE_SIZE überschreitet."""
-        # Logik bleibt gleich, läuft jetzt im Daemon-Thread
         total_size = 0
         file_details = []
         
@@ -51,7 +50,6 @@ class CoreEngine:
             for filepath, _ in file_details:
                 if total_size <= MAX_CACHE_SIZE_BYTES:
                     break
-                
                 try:
                     size = os.path.getsize(filepath)
                     os.remove(filepath)
@@ -76,7 +74,7 @@ class CoreEngine:
 
     def select_voice(self, npc_name, npc_gender):
         if not self.voices:
-            log_message("Keine Stimmen im Speicher. Versuche Laden...")
+            # log_message("Keine Stimmen im Speicher. Versuche Laden...") # Optional rausgenommen um Log sauber zu halten
             self.fetch_voices()
             if not self.voices: 
                 return "21m00Tcm4TlvDq8ikWAM", "NOTFALL (Rachel)" 
@@ -94,20 +92,30 @@ class CoreEngine:
         save_mapping(mapping)
         return vid, "Berechnet"
 
-    def run_pipeline(self):
-        """Steuert den gesamten OCR- und TTS-Prozess."""
+    def run_pipeline(self, skip_audio=False):
+        """
+        Steuert den gesamten OCR- und TTS-Prozess.
+        skip_audio: Wenn True, wird nur OCR gemacht (für Tests).
+        """
         
-        # 1. OCR (Delegiert an OCRExtractor)
+        # 1. OCR (Immer ausführen)
         txt = self.ocr_extractor.run_ocr()
+        
+        # Abbruch wenn kein Text (oder 'Kein Text gefunden')
         if not txt or len(txt) < 5:
-            return ""
+            return txt
+
+        # WENN TEST-MODUS: HIER ABBRECHEN
+        if skip_audio:
+            log_message("Audio übersprungen (Test-Modus).")
+            return txt
 
         # 2. TTS Vorbereitung
         npc_log, gender = self.get_npc_from_log()
         name = npc_log if npc_log != "Unknown" else "Unknown"
         vid, method = self.select_voice(name, gender)
 
-        # 3. Caching und Wiedergabe (Delegiert an TTSService)
+        # 3. Caching und Wiedergabe
         delay = float(self.config.get("audio_delay", 0.5))
         
         cache_key = f"{txt}_{vid}" 
