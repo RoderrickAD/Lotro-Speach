@@ -16,16 +16,79 @@ COLOR_TEXT_GOLD = "#c5a059"
 COLOR_TEXT_DIM = "#8c7b70"
 COLOR_ACCENT_RED = "#5c1815"
 COLOR_INPUT_BG = "#0f0a08"
+COLOR_FRAME_ACTIVE = "#ff0000" # Rot beim Bewegen
 
 FONT_TITLE = ("Georgia", 16, "bold")
 FONT_UI = ("Georgia", 11)
 FONT_BOLD = ("Georgia", 11, "bold")
 
+class DraggableRect:
+    """Hilfsklasse für die beweglichen Rahmen"""
+    def __init__(self, canvas, x, y, size, name, label_text):
+        self.canvas = canvas
+        self.name = name
+        self.x = x
+        self.y = y
+        self.w = size
+        self.h = size
+        
+        # Tags für Canvas-Objekte
+        self.tag_rect = f"{name}_rect"
+        self.tag_handle = f"{name}_handle"
+        self.tag_cross_v = f"{name}_cross_v"
+        self.tag_cross_h = f"{name}_cross_h"
+        self.tag_label = f"{name}_label"
+        self.all_tags = (self.tag_rect, self.tag_handle, self.tag_cross_v, self.tag_cross_h, self.tag_label)
+
+        self.draw()
+
+    def draw(self):
+        # Löschen falls existiert
+        for tag in self.all_tags: self.canvas.delete(tag)
+
+        # Rahmen
+        self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, 
+                                     outline=COLOR_TEXT_GOLD, width=2, tags=self.tag_rect)
+        
+        # Resize Handle (unten rechts)
+        handle_sz = 8
+        self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h,
+                                     fill=COLOR_TEXT_GOLD, outline="", tags=self.tag_handle)
+
+        # Fadenkreuz (Mitte) - DAS ZIEL
+        cx, cy = self.x + self.w/2, self.y + self.h/2
+        self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_v)
+        self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_h)
+
+        # Label
+        self.canvas.create_text(self.x, self.y-10, text=label_text, fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), tags=self.tag_label)
+
+    def contains(self, x, y):
+        return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
+
+    def on_handle(self, x, y):
+        # Prüfen ob Klick auf dem Resize-Handle war
+        return (self.x + self.w - 10 <= x <= self.x + self.w) and (self.y + self.h - 10 <= y <= self.y + self.h)
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        self.canvas.move(self.tag_rect, dx, dy)
+        self.canvas.move(self.tag_handle, dx, dy)
+        self.canvas.move(self.tag_cross_v, dx, dy)
+        self.canvas.move(self.tag_cross_h, dx, dy)
+        self.canvas.move(self.tag_label, dx, dy)
+
+    def resize(self, w, h):
+        self.w = max(20, w) # Min size
+        self.h = max(20, h)
+        self.draw() # Neu zeichnen ist einfacher bei Resize
+
 class LotroApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Der Vorleser von Mittelerde - Companion 2.0")
-        self.root.geometry("1100x800")
+        self.root.geometry("1100x850")
         self.root.configure(bg=COLOR_BG_DARK)
         
         if os.path.exists("app_icon.ico"):
@@ -35,7 +98,6 @@ class LotroApp:
         self.running = False
         self.hotkey_hook = None
         
-        # Hintergrund
         self.bg_photo = None
         self.setup_background()
         self.setup_styles()
@@ -54,11 +116,12 @@ class LotroApp:
         self.load_settings_to_ui()
         self.register_hotkey()
 
-        # Variablen für Kalibrierung
+        # Kalibrierungsvariablen
         self.calib_img_raw = None
-        self.calib_click_count = 0
-        self.calib_clicks = []
-        self.calib_photo = None
+        self.template_rects = {} # Speichert DraggableRect Objekte
+        self.active_rect = None
+        self.action_mode = None # 'move' oder 'resize'
+        self.last_mouse = (0, 0)
 
     def setup_background(self):
         bg_path = "background.png"
@@ -112,62 +175,90 @@ class LotroApp:
         btn = tk.Button(self.tab_status, text="Macht entfesseln (Scan)", command=self.run_once_manual, bg=COLOR_ACCENT_RED, fg=COLOR_TEXT_GOLD, font=FONT_BOLD)
         btn.pack(pady=20, ipadx=20, ipady=5)
 
-    # --- TAB 2: KALIBRIERUNG (NEU) ---
+    # --- TAB 2: KALIBRIERUNG ---
     def setup_calibration_tab(self):
-        # Linke Seite: Canvas (Bild)
-        # Rechte Seite: Steuerung
-        
         frame_controls = ttk.Frame(self.tab_calib, padding=10)
         frame_controls.pack(side="right", fill="y")
-        
         frame_canvas = ttk.Frame(self.tab_calib)
         frame_canvas.pack(side="left", fill="both", expand=True)
 
-        # Canvas mit Scrollbars
         self.calib_canvas = tk.Canvas(frame_canvas, bg="black", cursor="cross")
         v_scroll = ttk.Scrollbar(frame_canvas, orient="vertical", command=self.calib_canvas.yview)
         h_scroll = ttk.Scrollbar(frame_canvas, orient="horizontal", command=self.calib_canvas.xview)
-        
         self.calib_canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
-        
         v_scroll.pack(side="right", fill="y")
         h_scroll.pack(side="bottom", fill="x")
         self.calib_canvas.pack(side="left", fill="both", expand=True)
         
-        self.calib_canvas.bind("<Button-1>", self.on_canvas_click)
+        # Maus-Events für Drag & Drop
+        self.calib_canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.calib_canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.calib_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
 
-        # Controls Rechts
-        ttk.Label(frame_controls, text="1. Bild Erfassen", style="Header.TLabel").pack(anchor="w", pady=(0,5))
-        tk.Button(frame_controls, text="Screenshot aufnehmen (3s Timer)", command=self.take_calibration_screenshot, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=5)
+        # Controls
+        ttk.Label(frame_controls, text="1. Bild Erfassen", style="Header.TLabel").pack(anchor="w")
+        tk.Button(frame_controls, text="Screenshot (3s Timer)", command=self.take_calibration_screenshot, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=5)
         
-        ttk.Label(frame_controls, text="2. Ecken markieren", style="Header.TLabel").pack(anchor="w", pady=(15,5))
-        self.lbl_instruction = ttk.Label(frame_controls, text="Klicke: Oben Links", foreground="#ffffff")
-        self.lbl_instruction.pack(pady=5)
+        ttk.Label(frame_controls, text="2. Templates setzen", style="Header.TLabel").pack(anchor="w", pady=(15,5))
+        ttk.Label(frame_controls, text="Schiebe die Fadenkreuze\ngenau auf die Ecken!", foreground="#ffffff", justify="left").pack(anchor="w")
         
-        tk.Button(frame_controls, text="Auswahl zurücksetzen", command=self.reset_clicks, bg=COLOR_ACCENT_RED, fg="white").pack(fill="x", pady=5)
-        tk.Button(frame_controls, text="Templates speichern", command=self.save_templates_from_clicks, bg="#4caf50", fg="white").pack(fill="x", pady=5)
+        tk.Button(frame_controls, text="Rahmen zurücksetzen", command=self.spawn_default_rects, bg=COLOR_ACCENT_RED, fg="white").pack(fill="x", pady=5)
+        tk.Button(frame_controls, text="Templates speichern", command=self.save_templates_from_rects, bg="#4caf50", fg="white").pack(fill="x", pady=5)
 
         ttk.Label(frame_controls, text="3. Ränder (Padding)", style="Header.TLabel").pack(anchor="w", pady=(15,5))
-        
-        # Padding Inputs
         def create_pad_input(label_txt, attr_name):
-            frm = ttk.Frame(frame_controls)
-            frm.pack(fill="x", pady=2)
+            frm = ttk.Frame(frame_controls); frm.pack(fill="x", pady=2)
             ttk.Label(frm, text=label_txt, width=12).pack(side="left")
             spin = tk.Spinbox(frm, from_=0, to=200, width=5, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_GOLD, buttonbackground=COLOR_BG_PANEL)
             spin.pack(side="right")
             setattr(self, attr_name, spin)
-            return spin
-
+        
         create_pad_input("Oben:", "spin_top")
         create_pad_input("Unten:", "spin_bottom")
         create_pad_input("Links:", "spin_left")
-        create_pad_input("Rechts:", "spin_right") # Das ist das wichtige!
+        create_pad_input("Rechts:", "spin_right")
 
-        tk.Button(frame_controls, text="Einstellungen speichern & Testen", command=self.save_and_test_ocr, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=20)
+        tk.Button(frame_controls, text="Speichern & Testen", command=self.save_and_test_ocr, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=20)
+
+    def on_mouse_down(self, event):
+        if not self.calib_img_raw is None:
+            cx = self.calib_canvas.canvasx(event.x)
+            cy = self.calib_canvas.canvasy(event.y)
+            
+            # Checke, ob wir ein Objekt treffen (Reverse Order, damit oberstes zuerst)
+            for name, rect in self.template_rects.items():
+                if rect.on_handle(cx, cy):
+                    self.active_rect = rect
+                    self.action_mode = 'resize'
+                    self.last_mouse = (cx, cy)
+                    return
+                elif rect.contains(cx, cy):
+                    self.active_rect = rect
+                    self.action_mode = 'move'
+                    self.last_mouse = (cx, cy)
+                    return
+
+    def on_mouse_drag(self, event):
+        if self.active_rect:
+            cx = self.calib_canvas.canvasx(event.x)
+            cy = self.calib_canvas.canvasy(event.y)
+            dx = cx - self.last_mouse[0]
+            dy = cy - self.last_mouse[1]
+            
+            if self.action_mode == 'move':
+                self.active_rect.move(dx, dy)
+            elif self.action_mode == 'resize':
+                new_w = self.active_rect.w + dx
+                new_h = self.active_rect.h + dy
+                self.active_rect.resize(new_w, new_h)
+            
+            self.last_mouse = (cx, cy)
+
+    def on_mouse_up(self, event):
+        self.active_rect = None
+        self.action_mode = None
 
     def take_calibration_screenshot(self):
-        # Fenster minimieren, warten, Screenshot machen, Fenster wiederherstellen
         self.root.iconify()
         self.root.after(3000, self._do_screenshot)
 
@@ -177,103 +268,74 @@ class LotroApp:
             if mon_idx < 1 or mon_idx >= len(sct.monitors): mon_idx = 1
             sct_img = sct.grab(sct.monitors[mon_idx])
             img = np.array(sct_img)
-            self.calib_img_raw = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR) # Für Verarbeitung
+            self.calib_img_raw = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             
-            # Für Anzeige in Tkinter (RGB)
             img_rgb = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2RGB)
             im_pil = Image.fromarray(img_rgb)
             self.calib_photo = ImageTk.PhotoImage(im_pil)
 
             self.calib_canvas.config(scrollregion=(0,0, im_pil.width, im_pil.height))
+            self.calib_canvas.delete("all") # Alles löschen
             self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
             
         self.root.deiconify()
-        self.reset_clicks()
-        messagebox.showinfo("Bereit", "Screenshot geladen. Klicke jetzt nacheinander auf die 4 Ecken des Quest-Fensters.")
+        self.spawn_default_rects()
+        messagebox.showinfo("Bereit", "Verschiebe nun die goldenen Rahmen auf die Ecken.")
 
-    def on_canvas_click(self, event):
+    def spawn_default_rects(self):
         if self.calib_img_raw is None: return
-        if self.calib_click_count >= 4: return
+        # Alte Rects löschen
+        for r in self.template_rects.values():
+            for tag in r.all_tags: self.calib_canvas.delete(tag)
+        self.template_rects = {}
 
-        # Koordinaten unter Berücksichtigung des Scrollens
-        canvas_x = self.calib_canvas.canvasx(event.x)
-        canvas_y = self.calib_canvas.canvasy(event.y)
+        h, w = self.calib_img_raw.shape[:2]
+        size = 40
+        # Standardpositionen (Mitte grob)
+        mid_x, mid_y = w // 2, h // 2
         
-        self.calib_clicks.append((int(canvas_x), int(canvas_y)))
-        self.calib_click_count += 1
-        
-        # Zeichnen
-        r = 5
-        self.calib_canvas.create_oval(canvas_x-r, canvas_y-r, canvas_x+r, canvas_y+r, fill="red", outline="yellow", width=2)
-        self.calib_canvas.create_text(canvas_x+10, canvas_y-10, text=str(self.calib_click_count), fill="yellow", font=("Arial", 14, "bold"))
+        self.template_rects["top_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y - 150, size, "top_left", "Oben Links")
+        self.template_rects["top_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y - 150, size, "top_right", "Oben Rechts")
+        self.template_rects["bottom_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y + 150, size, "bottom_left", "Unten Links")
+        self.template_rects["bottom_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y + 150, size, "bottom_right", "Unten Rechts")
 
-        labels = ["Oben Rechts", "Unten Rechts", "Unten Links", "Fertig! Speichern drücken."]
-        if self.calib_click_count < 4:
-            self.lbl_instruction.config(text=f"Klicke: {labels[self.calib_click_count-1]}")
-        else:
-            self.lbl_instruction.config(text="Fertig! Jetzt 'Templates speichern' klicken.")
-
-    def reset_clicks(self):
-        self.calib_clicks = []
-        self.calib_click_count = 0
-        self.lbl_instruction.config(text="Klicke: Oben Links")
-        # Bild neu zeichnen (löscht Markierungen)
-        if self.calib_photo:
-            self.calib_canvas.delete("all")
-            self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
-
-    def save_templates_from_clicks(self):
-        if len(self.calib_clicks) != 4:
-            messagebox.showerror("Fehler", "Bitte genau 4 Ecken markieren!")
-            return
-            
-        try:
-            template_dir = "templates"
-            if not os.path.exists(template_dir): os.makedirs(template_dir)
-            
-            names = ["top_left.png", "top_right.png", "bottom_right.png", "bottom_left.png"]
-            crop_size = 25
-            half = crop_size // 2
-            
-            img_gray = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2GRAY)
-            
-            for i, (x, y) in enumerate(self.calib_clicks):
-                # Bounds check
-                y1 = max(0, y - half)
-                y2 = min(img_gray.shape[0], y + half)
-                x1 = max(0, x - half)
-                x2 = min(img_gray.shape[1], x + half)
+    def save_templates_from_rects(self):
+        if not self.calib_img_raw is None and len(self.template_rects) == 4:
+            try:
+                template_dir = "templates"
+                if not os.path.exists(template_dir): os.makedirs(template_dir)
                 
-                crop = img_gray[y1:y2, x1:x2]
-                path = os.path.join(template_dir, names[i])
-                cv2.imwrite(path, crop)
+                img_gray = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2GRAY)
                 
-            # Templates im Engine neu laden
-            self.engine.ocr_extractor.templates = self.engine.ocr_extractor._load_templates()
-            messagebox.showinfo("Erfolg", "Templates wurden gespeichert und geladen!")
-            
-        except Exception as e:
-            messagebox.showerror("Fehler", str(e))
+                for name, rect in self.template_rects.items():
+                    # Koordinaten auslesen
+                    x, y, w, h = int(rect.x), int(rect.y), int(rect.w), int(rect.h)
+                    # Bounds check
+                    x = max(0, x); y = max(0, y)
+                    w = min(w, img_gray.shape[1] - x)
+                    h = min(h, img_gray.shape[0] - y)
+                    
+                    crop = img_gray[y:y+h, x:x+w]
+                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), crop)
+                
+                self.engine.ocr_extractor.templates = self.engine.ocr_extractor._load_templates()
+                messagebox.showinfo("Erfolg", "Templates gespeichert! Die Fadenkreuze sind nun die Ankerpunkte.")
+            except Exception as e:
+                messagebox.showerror("Fehler", str(e))
 
     def save_and_test_ocr(self):
-        # Config speichern
         cfg = self.engine.config
         try:
             cfg["padding_top"] = int(self.spin_top.get())
             cfg["padding_bottom"] = int(self.spin_bottom.get())
             cfg["padding_left"] = int(self.spin_left.get())
             cfg["padding_right"] = int(self.spin_right.get())
-            
             save_config(cfg)
-            self.engine.ocr_extractor.config = cfg # Update live
+            self.engine.ocr_extractor.config = cfg
             
-            # TESTLAUF
-            txt = self.engine.run_pipeline() # Führt OCR (und TTS, Achtung) aus
-            
-            # Zeige Ergebnis im Status Tab
+            txt = self.engine.run_pipeline()
             self.update_ui_text(f"--- TESTERGEBNIS ---\n{txt}")
-            self.notebook.select(self.tab_status) # Wechsel zum Status Tab
-            
+            self.notebook.select(self.tab_status)
         except Exception as e:
             messagebox.showerror("Fehler", str(e))
 
@@ -311,7 +373,6 @@ class LotroApp:
         self.cmb_monitor.set(str(cfg.get("monitor_index", 1)))
         self.var_debug.set(cfg.get("debug_mode", False))
         
-        # Load Paddings
         self.spin_top.delete(0, "end"); self.spin_top.insert(0, cfg.get("padding_top", 10))
         self.spin_bottom.delete(0, "end"); self.spin_bottom.insert(0, cfg.get("padding_bottom", 20))
         self.spin_left.delete(0, "end"); self.spin_left.insert(0, cfg.get("padding_left", 10))
