@@ -130,3 +130,23 @@ class TTSService:
     def play_audio_file(self, filepath):
         """Öffentliche Schnittstelle für die Wiedergabe, startet den Thread."""
         threading.Thread(target=self._play_audio_thread, args=(filepath,)).start()
+
+
+def toggle_pause(self):
+        """Pausiert oder setzt die Wiedergabe fort."""
+        try:
+            if not pygame.mixer.get_init():
+                return
+
+            if pygame.mixer.music.get_busy():
+                # Musik läuft -> Pausieren
+                log_message("Audio pausiert.")
+                pygame.mixer.music.pause()
+            else:
+                # Prüfen, ob wir im Pause-Zustand sind (get_pos > 0 bedeutet es lief schon was)
+                # Leider gibt get_busy() bei Pause False zurück. Wir versuchen unpause.
+                # Ein 'blindes' Unpause schadet nicht.
+                log_message("Audio fortgesetzt.")
+                pygame.mixer.music.unpause()
+        except Exception as e:
+            log_message(f"Fehler beim Pausieren: {e}")
