@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from PIL import Image, ImageTk  # pip install Pillow
+from PIL import Image, ImageTk 
 import threading
 import os
 import cv2
@@ -27,36 +27,62 @@ class DraggableRect:
         self.name = name
         self.x = x; self.y = y; self.w = size; self.h = size
         
-        self.tag_rect = f"{name}_rect"
-        self.tag_handle = f"{name}_handle"
-        self.tag_cross_v = f"{name}_cross_v"
-        self.tag_cross_h = f"{name}_cross_h"
-        self.tag_label = f"{name}_label"
-        self.all_tags = (self.tag_rect, self.tag_handle, self.tag_cross_v, self.tag_cross_h, self.tag_label)
+        # Eindeutige Tags für dieses Objekt
+        self.tag_root = f"item_{name}"      # Tag für ALLES (Rahmen + Griff + Text)
+        self.tag_rect = f"rect_{name}"      # Tag nur für den Rahmen
+        self.tag_handle = f"handle_{name}"  # Tag für den roten Griff
+        
         self.draw()
 
     def draw(self):
-        for tag in self.all_tags: self.canvas.delete(tag)
-        self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, outline=COLOR_TEXT_GOLD, width=2, tags=self.tag_rect)
-        handle_sz = 8
-        self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h, fill=COLOR_TEXT_GOLD, outline="", tags=self.tag_handle)
+        # Alte Zeichnung löschen (wichtig beim Resizen)
+        self.canvas.delete(self.tag_root)
+
+        # 1. Der Rahmen (mit 'stipple' für Transparenz-Effekt, damit man ihn gut greifen kann)
+        self.canvas.create_rectangle(
+            self.x, self.y, self.x+self.w, self.y+self.h, 
+            outline=COLOR_TEXT_GOLD, 
+            width=3, 
+            fill="gray25", stipple="gray25", # Halbtransparent füllen
+            tags=(self.tag_root, self.tag_rect)
+        )
+        
+        # 2. Resize Handle (Unten Rechts, Rot & Groß)
+        handle_sz = 15
+        self.canvas.create_rectangle(
+            self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h, 
+            fill="red", outline="white", 
+            tags=(self.tag_root, self.tag_handle)
+        )
+
+        # 3. Fadenkreuz (Mitte - Das Ziel)
         cx, cy = self.x + self.w/2, self.y + self.h/2
-        self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_v)
-        self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_h)
-        self.canvas.create_text(self.x, self.y-10, text=label_text, fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), tags=self.tag_label)
+        self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
+        self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
 
-    def contains(self, x, y): return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
-    def on_handle(self, x, y): return (self.x + self.w - 10 <= x <= self.x + self.w) and (self.y + self.h - 10 <= y <= self.y + self.h)
-    
+        # 4. Label Text
+        self.canvas.create_text(
+            self.x, self.y-12, 
+            text=self.name.replace("_", " ").title(), 
+            fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), 
+            tags=self.tag_root
+        )
+
     def move(self, dx, dy):
-        self.x += dx; self.y += dy
-        self.canvas.move(self.tag_rect, dx, dy); self.canvas.move(self.tag_handle, dx, dy)
-        self.canvas.move(self.tag_cross_v, dx, dy); self.canvas.move(self.tag_cross_h, dx, dy)
-        self.canvas.move(self.tag_label, dx, dy)
+        self.x += dx
+        self.y += dy
+        self.canvas.move(self.tag_root, dx, dy)
 
-    def resize(self, w, h):
-        self.w = max(20, w); self.h = max(20, h)
-        self.draw()
+    def resize(self, new_w, new_h):
+        # Mindestgröße 20px
+        self.w = max(20, new_w)
+        self.h = max(20, new_h)
+        self.draw() # Neu zeichnen ist einfacher als einzelne Punkte verschieben
+
+    def highlight(self, active=True):
+        # Visuelles Feedback beim Klicken
+        color = "white" if active else COLOR_TEXT_GOLD
+        self.canvas.itemconfig(self.tag_rect, outline=color)
 
 class LotroApp:
     def __init__(self, root):
@@ -88,10 +114,11 @@ class LotroApp:
         self.load_settings_to_ui()
         self.register_hotkey()
 
+        # Variablen für Kalibrierung
         self.calib_img_raw = None
         self.template_rects = {} 
         self.active_rect = None
-        self.action_mode = None
+        self.action_mode = None # 'move' oder 'resize'
         self.last_mouse = (0, 0)
 
     def setup_background(self):
@@ -161,6 +188,7 @@ class LotroApp:
         h_scroll.pack(side="bottom", fill="x")
         self.calib_canvas.pack(side="left", fill="both", expand=True)
         
+        # BINDINGS FÜR MAUS-EVENTS
         self.calib_canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.calib_canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.calib_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
@@ -189,30 +217,67 @@ class LotroApp:
 
         tk.Button(frame_controls, text="Speichern & Testen", command=self.save_and_test_ocr, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=20)
 
+    # --- MAUS LOGIK (Überarbeitet & Robust) ---
     def on_mouse_down(self, event):
-        if not self.calib_img_raw is None:
-            cx = self.calib_canvas.canvasx(event.x)
-            cy = self.calib_canvas.canvasy(event.y)
+        # Klick-Koordinaten im Canvas-System (wichtig bei Scrollbars!)
+        cx = self.calib_canvas.canvasx(event.x)
+        cy = self.calib_canvas.canvasy(event.y)
+        
+        # Finde ALLE Objekte an dieser Stelle (liefert IDs)
+        # Wir suchen einen kleinen Bereich um den Klick herum (Toleranz)
+        clicked_items = self.calib_canvas.find_overlapping(cx-2, cy-2, cx+2, cy+2)
+        
+        if not clicked_items:
+            print("Klick ins Leere.")
+            return
+
+        # Wir müssen das oberste Objekt finden, das zu einem unserer Rects gehört
+        # Wir iterieren rückwärts (oberste items zuerst)
+        for item_id in reversed(clicked_items):
+            tags = self.calib_canvas.gettags(item_id)
+            if not tags: continue
+            
+            # Prüfen, ob wir ein Handle oder einen Rahmen getroffen haben
             for name, rect in self.template_rects.items():
-                if rect.on_handle(cx, cy):
-                    self.active_rect = rect; self.action_mode = 'resize'; self.last_mouse = (cx, cy)
+                if rect.tag_handle in tags:
+                    print(f"Resize Handle von {name} getroffen!")
+                    self.active_rect = rect
+                    self.action_mode = 'resize'
+                    self.last_mouse = (cx, cy)
+                    rect.highlight(True)
                     return
-                elif rect.contains(cx, cy):
-                    self.active_rect = rect; self.action_mode = 'move'; self.last_mouse = (cx, cy)
+                elif rect.tag_rect in tags or rect.tag_root in tags:
+                    print(f"Rahmen von {name} getroffen!")
+                    self.active_rect = rect
+                    self.action_mode = 'move'
+                    self.last_mouse = (cx, cy)
+                    rect.highlight(True)
                     return
 
     def on_mouse_drag(self, event):
-        if self.active_rect:
+        if self.active_rect and self.action_mode:
             cx = self.calib_canvas.canvasx(event.x)
             cy = self.calib_canvas.canvasy(event.y)
+            
             dx = cx - self.last_mouse[0]
             dy = cy - self.last_mouse[1]
-            if self.action_mode == 'move': self.active_rect.move(dx, dy)
-            elif self.action_mode == 'resize': self.active_rect.resize(self.active_rect.w + dx, self.active_rect.h + dy)
+            
+            if self.action_mode == 'move':
+                self.active_rect.move(dx, dy)
+            elif self.action_mode == 'resize':
+                # Neue Breite/Höhe berechnen
+                new_w = self.active_rect.w + dx
+                new_h = self.active_rect.h + dy
+                self.active_rect.resize(new_w, new_h)
+            
             self.last_mouse = (cx, cy)
 
     def on_mouse_up(self, event):
-        self.active_rect = None; self.action_mode = None
+        if self.active_rect:
+            self.active_rect.highlight(False) # Highlight aus
+            print("Drag beendet.")
+        self.active_rect = None
+        self.action_mode = None
 
     def take_calibration_screenshot(self):
         self.root.iconify()
@@ -220,8 +285,11 @@ class LotroApp:
 
     def _do_screenshot(self):
         with mss.mss() as sct:
-            mon_idx = int(self.cmb_monitor.get())
+            try:
+                mon_idx = int(self.cmb_monitor.get())
+            except: mon_idx = 1
             if mon_idx < 1 or mon_idx >= len(sct.monitors): mon_idx = 1
+            
             sct_img = sct.grab(sct.monitors[mon_idx])
             img = np.array(sct_img)
             self.calib_img_raw = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -236,36 +304,51 @@ class LotroApp:
             
         self.root.deiconify()
         self.spawn_default_rects()
-        messagebox.showinfo("Bereit", "Verschiebe nun die goldenen Rahmen auf die Ecken.")
+        messagebox.showinfo("Bereit", "Verschiebe nun die goldenen Rahmen.")
 
     def spawn_default_rects(self):
-        if self.calib_img_raw is None: return
-        for r in self.template_rects.values():
-            for tag in r.all_tags: self.calib_canvas.delete(tag)
-        self.template_rects = {}
+        if self.calib_img_raw is None: 
+            print("Kein Bild für Rects vorhanden.")
+            return
+            
+        self.template_rects = {} # Reset
+        # Achtung: Canvas nicht komplett löschen, sonst ist das Bild weg!
+        # Wir löschen nur alte Items die mit 'item_' beginnen (unsere Tags)
+        # Einfacher: wir wissen, dass create_image als erstes kam. Alles danach kann weg.
+        # Aber sicher ist sicher: Wir löschen per Tag.
+        self.calib_canvas.delete("all")
+        self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
 
         h, w = self.calib_img_raw.shape[:2]
         size = 40
         mid_x, mid_y = w // 2, h // 2
+        
+        # Erstelle 4 neue DraggableRects
         self.template_rects["top_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y - 150, size, "top_left", "Oben Links")
         self.template_rects["top_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y - 150, size, "top_right", "Oben Rechts")
         self.template_rects["bottom_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y + 150, size, "bottom_left", "Unten Links")
         self.template_rects["bottom_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y + 150, size, "bottom_right", "Unten Rechts")
+        print("4 Rahmen erstellt.")
 
     def save_templates_from_rects(self):
         if not self.calib_img_raw is None and len(self.template_rects) == 4:
             try:
                 template_dir = "templates"
                 if not os.path.exists(template_dir): os.makedirs(template_dir)
+                
                 img_gray = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2GRAY)
+                
                 for name, rect in self.template_rects.items():
                     x, y, w, h = int(rect.x), int(rect.y), int(rect.w), int(rect.h)
                     x = max(0, x); y = max(0, y)
                     w = min(w, img_gray.shape[1] - x)
                     h = min(h, img_gray.shape[0] - y)
-                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), img_gray[y:y+h, x:x+w])
+                    
+                    crop = img_gray[y:y+h, x:x+w]
+                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), crop)
+                
                 self.engine.ocr_extractor.templates = self.engine.ocr_extractor._load_templates()
-                messagebox.showinfo("Erfolg", "Templates gespeichert!")
+                messagebox.showinfo("Erfolg", "Templates gespeichert! Die Fadenkreuze sind nun die Ankerpunkte.")
             except Exception as e:
                 messagebox.showerror("Fehler", str(e))
 
