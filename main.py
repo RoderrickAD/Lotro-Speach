@@ -16,73 +16,47 @@ COLOR_TEXT_GOLD = "#c5a059"
 COLOR_TEXT_DIM = "#8c7b70"
 COLOR_ACCENT_RED = "#5c1815"
 COLOR_INPUT_BG = "#0f0a08"
-COLOR_FRAME_ACTIVE = "#ff0000" # Rot beim Bewegen
 
 FONT_TITLE = ("Georgia", 16, "bold")
 FONT_UI = ("Georgia", 11)
 FONT_BOLD = ("Georgia", 11, "bold")
 
 class DraggableRect:
-    """Hilfsklasse für die beweglichen Rahmen"""
     def __init__(self, canvas, x, y, size, name, label_text):
         self.canvas = canvas
         self.name = name
-        self.x = x
-        self.y = y
-        self.w = size
-        self.h = size
+        self.x = x; self.y = y; self.w = size; self.h = size
         
-        # Tags für Canvas-Objekte
         self.tag_rect = f"{name}_rect"
         self.tag_handle = f"{name}_handle"
         self.tag_cross_v = f"{name}_cross_v"
         self.tag_cross_h = f"{name}_cross_h"
         self.tag_label = f"{name}_label"
         self.all_tags = (self.tag_rect, self.tag_handle, self.tag_cross_v, self.tag_cross_h, self.tag_label)
-
         self.draw()
 
     def draw(self):
-        # Löschen falls existiert
         for tag in self.all_tags: self.canvas.delete(tag)
-
-        # Rahmen
-        self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, 
-                                     outline=COLOR_TEXT_GOLD, width=2, tags=self.tag_rect)
-        
-        # Resize Handle (unten rechts)
+        self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, outline=COLOR_TEXT_GOLD, width=2, tags=self.tag_rect)
         handle_sz = 8
-        self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h,
-                                     fill=COLOR_TEXT_GOLD, outline="", tags=self.tag_handle)
-
-        # Fadenkreuz (Mitte) - DAS ZIEL
+        self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, self.x+self.w, self.y+self.h, fill=COLOR_TEXT_GOLD, outline="", tags=self.tag_handle)
         cx, cy = self.x + self.w/2, self.y + self.h/2
         self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_v)
         self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_cross_h)
-
-        # Label
         self.canvas.create_text(self.x, self.y-10, text=label_text, fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), tags=self.tag_label)
 
-    def contains(self, x, y):
-        return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
-
-    def on_handle(self, x, y):
-        # Prüfen ob Klick auf dem Resize-Handle war
-        return (self.x + self.w - 10 <= x <= self.x + self.w) and (self.y + self.h - 10 <= y <= self.y + self.h)
-
+    def contains(self, x, y): return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
+    def on_handle(self, x, y): return (self.x + self.w - 10 <= x <= self.x + self.w) and (self.y + self.h - 10 <= y <= self.y + self.h)
+    
     def move(self, dx, dy):
-        self.x += dx
-        self.y += dy
-        self.canvas.move(self.tag_rect, dx, dy)
-        self.canvas.move(self.tag_handle, dx, dy)
-        self.canvas.move(self.tag_cross_v, dx, dy)
-        self.canvas.move(self.tag_cross_h, dx, dy)
+        self.x += dx; self.y += dy
+        self.canvas.move(self.tag_rect, dx, dy); self.canvas.move(self.tag_handle, dx, dy)
+        self.canvas.move(self.tag_cross_v, dx, dy); self.canvas.move(self.tag_cross_h, dx, dy)
         self.canvas.move(self.tag_label, dx, dy)
 
     def resize(self, w, h):
-        self.w = max(20, w) # Min size
-        self.h = max(20, h)
-        self.draw() # Neu zeichnen ist einfacher bei Resize
+        self.w = max(20, w); self.h = max(20, h)
+        self.draw()
 
 class LotroApp:
     def __init__(self, root):
@@ -91,14 +65,12 @@ class LotroApp:
         self.root.geometry("1100x850")
         self.root.configure(bg=COLOR_BG_DARK)
         
-        if os.path.exists("app_icon.ico"):
-            self.root.iconbitmap("app_icon.ico")
+        if os.path.exists("app_icon.ico"): self.root.iconbitmap("app_icon.ico")
 
         self.engine = CoreEngine()
         self.running = False
         self.hotkey_hook = None
         
-        self.bg_photo = None
         self.setup_background()
         self.setup_styles()
 
@@ -116,11 +88,10 @@ class LotroApp:
         self.load_settings_to_ui()
         self.register_hotkey()
 
-        # Kalibrierungsvariablen
         self.calib_img_raw = None
-        self.template_rects = {} # Speichert DraggableRect Objekte
+        self.template_rects = {} 
         self.active_rect = None
-        self.action_mode = None # 'move' oder 'resize'
+        self.action_mode = None
         self.last_mouse = (0, 0)
 
     def setup_background(self):
@@ -190,12 +161,10 @@ class LotroApp:
         h_scroll.pack(side="bottom", fill="x")
         self.calib_canvas.pack(side="left", fill="both", expand=True)
         
-        # Maus-Events für Drag & Drop
         self.calib_canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.calib_canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.calib_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
 
-        # Controls
         ttk.Label(frame_controls, text="1. Bild Erfassen", style="Header.TLabel").pack(anchor="w")
         tk.Button(frame_controls, text="Screenshot (3s Timer)", command=self.take_calibration_screenshot, bg=COLOR_TEXT_GOLD, fg="black").pack(fill="x", pady=5)
         
@@ -224,18 +193,12 @@ class LotroApp:
         if not self.calib_img_raw is None:
             cx = self.calib_canvas.canvasx(event.x)
             cy = self.calib_canvas.canvasy(event.y)
-            
-            # Checke, ob wir ein Objekt treffen (Reverse Order, damit oberstes zuerst)
             for name, rect in self.template_rects.items():
                 if rect.on_handle(cx, cy):
-                    self.active_rect = rect
-                    self.action_mode = 'resize'
-                    self.last_mouse = (cx, cy)
+                    self.active_rect = rect; self.action_mode = 'resize'; self.last_mouse = (cx, cy)
                     return
                 elif rect.contains(cx, cy):
-                    self.active_rect = rect
-                    self.action_mode = 'move'
-                    self.last_mouse = (cx, cy)
+                    self.active_rect = rect; self.action_mode = 'move'; self.last_mouse = (cx, cy)
                     return
 
     def on_mouse_drag(self, event):
@@ -244,19 +207,12 @@ class LotroApp:
             cy = self.calib_canvas.canvasy(event.y)
             dx = cx - self.last_mouse[0]
             dy = cy - self.last_mouse[1]
-            
-            if self.action_mode == 'move':
-                self.active_rect.move(dx, dy)
-            elif self.action_mode == 'resize':
-                new_w = self.active_rect.w + dx
-                new_h = self.active_rect.h + dy
-                self.active_rect.resize(new_w, new_h)
-            
+            if self.action_mode == 'move': self.active_rect.move(dx, dy)
+            elif self.action_mode == 'resize': self.active_rect.resize(self.active_rect.w + dx, self.active_rect.h + dy)
             self.last_mouse = (cx, cy)
 
     def on_mouse_up(self, event):
-        self.active_rect = None
-        self.action_mode = None
+        self.active_rect = None; self.action_mode = None
 
     def take_calibration_screenshot(self):
         self.root.iconify()
@@ -275,7 +231,7 @@ class LotroApp:
             self.calib_photo = ImageTk.PhotoImage(im_pil)
 
             self.calib_canvas.config(scrollregion=(0,0, im_pil.width, im_pil.height))
-            self.calib_canvas.delete("all") # Alles löschen
+            self.calib_canvas.delete("all")
             self.calib_canvas.create_image(0, 0, image=self.calib_photo, anchor="nw")
             
         self.root.deiconify()
@@ -284,16 +240,13 @@ class LotroApp:
 
     def spawn_default_rects(self):
         if self.calib_img_raw is None: return
-        # Alte Rects löschen
         for r in self.template_rects.values():
             for tag in r.all_tags: self.calib_canvas.delete(tag)
         self.template_rects = {}
 
         h, w = self.calib_img_raw.shape[:2]
         size = 40
-        # Standardpositionen (Mitte grob)
         mid_x, mid_y = w // 2, h // 2
-        
         self.template_rects["top_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y - 150, size, "top_left", "Oben Links")
         self.template_rects["top_right"] = DraggableRect(self.calib_canvas, mid_x + 200, mid_y - 150, size, "top_right", "Oben Rechts")
         self.template_rects["bottom_left"] = DraggableRect(self.calib_canvas, mid_x - 200, mid_y + 150, size, "bottom_left", "Unten Links")
@@ -304,22 +257,15 @@ class LotroApp:
             try:
                 template_dir = "templates"
                 if not os.path.exists(template_dir): os.makedirs(template_dir)
-                
                 img_gray = cv2.cvtColor(self.calib_img_raw, cv2.COLOR_BGR2GRAY)
-                
                 for name, rect in self.template_rects.items():
-                    # Koordinaten auslesen
                     x, y, w, h = int(rect.x), int(rect.y), int(rect.w), int(rect.h)
-                    # Bounds check
                     x = max(0, x); y = max(0, y)
                     w = min(w, img_gray.shape[1] - x)
                     h = min(h, img_gray.shape[0] - y)
-                    
-                    crop = img_gray[y:y+h, x:x+w]
-                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), crop)
-                
+                    cv2.imwrite(os.path.join(template_dir, f"{name}.png"), img_gray[y:y+h, x:x+w])
                 self.engine.ocr_extractor.templates = self.engine.ocr_extractor._load_templates()
-                messagebox.showinfo("Erfolg", "Templates gespeichert! Die Fadenkreuze sind nun die Ankerpunkte.")
+                messagebox.showinfo("Erfolg", "Templates gespeichert!")
             except Exception as e:
                 messagebox.showerror("Fehler", str(e))
 
@@ -333,8 +279,11 @@ class LotroApp:
             save_config(cfg)
             self.engine.ocr_extractor.config = cfg
             
-            txt = self.engine.run_pipeline()
-            self.update_ui_text(f"--- TESTERGEBNIS ---\n{txt}")
+            # --- HIER IST DIE ÄNDERUNG: SKIP AUDIO = TRUE ---
+            txt = self.engine.run_pipeline(skip_audio=True)
+            # ------------------------------------------------
+            
+            self.update_ui_text(f"--- TESTERGEBNIS (Audio stummgeschaltet) ---\n{txt}")
             self.notebook.select(self.tab_status)
         except Exception as e:
             messagebox.showerror("Fehler", str(e))
