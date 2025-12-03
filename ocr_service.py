@@ -28,7 +28,6 @@ class OCRExtractor:
         }
 
         if not os.path.exists(template_dir):
-            log_message(f"WARNUNG: Template-Ordner nicht gefunden: {template_dir}")
             return None
 
         success = True
@@ -37,11 +36,9 @@ class OCRExtractor:
             if os.path.exists(filepath):
                 templates[key] = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE) 
             else:
-                log_message(f"WARNUNG: Template fehlt: {filename}")
                 success = False
         
         if success and len(templates) == 4:
-            log_message(f"4 Templates erfolgreich geladen.")
             return templates
         else:
             return None
@@ -58,7 +55,6 @@ class OCRExtractor:
                 monitor = sct.monitors[mon_idx]
                 sct_img = sct.grab(monitor)
                 img = np.array(sct_img)
-                # MSS gibt BGRA zurück, wir brauchen BGR
                 img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 return img
         except Exception as e:
@@ -67,12 +63,13 @@ class OCRExtractor:
 
     def isolate_text_colors(self, img):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        
-        # Farben filtern (Gold/Weiß)
+
+        # 1. Gelb / Gold
         lower_yellow = np.array([15, 70, 70])
         upper_yellow = np.array([35, 255, 255])
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
+        # 2. Weiß / Silber / Hellgrau
         lower_white = np.array([0, 0, 140])      
         upper_white = np.array([180, 50, 255])   
         mask_white = cv2.inRange(hsv, lower_white, upper_white)
@@ -83,20 +80,25 @@ class OCRExtractor:
         return final_image
 
     def crop_to_text_content(self, binary_img):
+        """Schneidet leere Ränder weg."""
         inverted = cv2.bitwise_not(binary_img)
         contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours: return binary_img 
 
-        min_x, min_y = binary_img.shape[1], binary_img.shape[0]
-        max_x = max_y = 0
+        min_x = binary_img.shape[1]
+        min_y = binary_img.shape[0]
+        max_x = 0
+        max_y = 0
 
         found = False
         for c in contours:
             if cv2.contourArea(c) < 50: continue
             x, y, w, h = cv2.boundingRect(c)
-            min_x, min_y = min(min_x, x), min(min_y, y)
-            max_x, max_y = max(max_x, x + w), max(max_y, y + h)
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x + w)
+            max_y = max(max_y, y + h)
             found = True
 
         if not found: return binary_img
@@ -117,9 +119,6 @@ class OCRExtractor:
 
         gray_screenshot = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         found_positions = {}
-        
-        # --- TOLERANZ ANPASSUNG ---
-        # War 0.80 -> Jetzt 0.60 (Viel toleranter)
         threshold = 0.80 
 
         for key, template_img in self.templates.items():
@@ -129,8 +128,6 @@ class OCRExtractor:
             if max_val >= threshold:
                 found_positions[key] = max_loc 
             else:
-                # DEBUG: Welches Template fehlt?
-                # log_message(f"Template nicht gefunden: {key} (Max Val: {max_val:.2f})")
                 return None, None
 
         if len(found_positions) < 4:
@@ -146,11 +143,19 @@ class OCRExtractor:
             final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
             final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
             
-            padding = -10
-            final_x1 = max(0, final_x1 - padding)
-            final_y1 = max(0, final_y1 - padding)
-            final_x2 = min(w_img, final_x2 + padding)
-            final_y2 = min(h_img, final_y2 + padding)
+            # --- ÄNDERUNG HIER: PADDING RECHTS ERHÖHT ---
+            # Vorher: padding = 10 für alle Seiten
+            # Jetzt: Speziell rechts (+50) und unten (+20) mehr Platz lassen
+            padding_top_left = 10
+            padding_right = 50   # 50 Pixel mehr Platz nach rechts!
+            padding_bottom = 20  # Etwas mehr Platz nach unten
+
+            final_x1 = max(0, final_x1 - padding_top_left)
+            final_y1 = max(0, final_y1 - padding_top_left)
+            
+            # Hier geben wir rechts ordentlich was dazu
+            final_x2 = min(w_img, final_x2 + padding_right)
+            final_y2 = min(h_img, final_y2 + padding_bottom)
 
             w_final = final_x2 - final_x1
             h_final = final_y2 - final_y1
@@ -159,7 +164,7 @@ class OCRExtractor:
             
             if w_final < 50 or h_final < 50: return None, None
             
-            log_message(f"Templates gefunden ({threshold*100}%). Bereich: {w_final}x{h_final}")
+            log_message(f"Templates gefunden. Bereich: {w_final}x{h_final}")
             return dialog_region, (final_x1, final_y1, w_final, h_final)
             
         except Exception as e:
@@ -174,26 +179,23 @@ class OCRExtractor:
         
         if cropped_img is None:
             log_message("Kein Dialog-Template erkannt.")
-            
-            # --- DEBUG: Warum gescheitert? ---
-            if self.config.get("debug_mode", False):
-                try: 
-                    # Speichere das Bild, auf dem gesucht wurde
-                    cv2.imwrite("debug_failed_template_search.png", img)
-                    log_message("Fehlerbild gespeichert: debug_failed_template_search.png")
-                except: pass
-            # ---------------------------------
-            
             return "Kein Text gefunden"
 
         if self.config.get("debug_mode", False):
-            try: cv2.imwrite("debug_detection_view.png", cropped_img)
+            try: 
+                (x, y, w, h) = coords
+                debug_full = img.copy()
+                cv2.rectangle(debug_full, (x, y), (x + w, y + h), (0, 0, 255), 3) 
+                cv2.imwrite("debug_detection_view.png", debug_full)
             except: pass
 
         processed_img = self.isolate_text_colors(cropped_img)
+        
+        # crop_to_text_content schneidet überschüssigen Rand sowieso wieder weg,
+        # daher ist das extra Padding oben sicher!
         processed_img = self.crop_to_text_content(processed_img)
 
-        # Upscaling (Word-Spacing Fix)
+        # Upscaling
         processed_img = cv2.resize(processed_img, None, fx=4.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
         _, processed_img = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY)
 
@@ -201,8 +203,8 @@ class OCRExtractor:
             try: cv2.imwrite("debug_ocr_input.png", processed_img)
             except: pass
 
-        psm = self.config.get("ocr_psm", 6)
-        lang = self.config.get("ocr_language", "deu+eng") 
+        psm = self.config.get("ocr_psm", 11)
+        lang = self.config.get("ocr_language", "deu") 
         whitelist = self.config.get("ocr_whitelist", "")
         
         custom_config = f'--psm {psm} -c preserve_interword_spaces=1'
@@ -216,7 +218,7 @@ class OCRExtractor:
             if self.config.get("debug_mode", False):
                 try:
                     with open("debug_ocr_text.txt", "w", encoding="utf-8") as f:
-                        f.write(f"--- OCR ROHDATEN ---\nErgebnis:\n{result}")
+                        f.write(f"--- OCR ROHDATEN ---\nConfig: {custom_config}\nErgebnis:\n{result}")
                 except: pass
 
             if not result: return "Kein Text gefunden"
