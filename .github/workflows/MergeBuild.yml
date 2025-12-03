@@ -22,6 +22,7 @@ jobs:
     - name: ⚙️ Systemabhängigkeiten installieren
       run: |
         pip install pyinstaller
+        pip install google-generativeai
         pip install -r requirements.txt
 
     - name: 🧬 Python-Skripte verschmelzen
