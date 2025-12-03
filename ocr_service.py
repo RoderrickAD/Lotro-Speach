@@ -10,7 +10,7 @@ class OCRExtractor:
     def __init__(self, config):
         self.config = config
         
-        # Tesseract Pfad setzen
+        # Tesseract Initialisierung
         tess_path = self.config.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
         pytesseract.pytesseract.tesseract_cmd = tess_path
         
@@ -55,6 +55,7 @@ class OCRExtractor:
                 monitor = sct.monitors[mon_idx]
                 sct_img = sct.grab(monitor)
                 img = np.array(sct_img)
+                # MSS gibt BGRA zurück, wir brauchen BGR
                 img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 return img
         except Exception as e:
@@ -81,6 +82,53 @@ class OCRExtractor:
         final_image = cv2.bitwise_not(combined_mask)
 
         return final_image
+
+    def crop_to_text_content(self, binary_img):
+        """
+        Nimmt ein Bild (Schwarz Text auf Weißem Grund) und schneidet den 
+        leeren weißen Rand weg, sodass nur der Text übrig bleibt.
+        """
+        # Invertieren für Kontursuche (Wir brauchen Weiß auf Schwarz)
+        inverted = cv2.bitwise_not(binary_img)
+        
+        # Finde alle Pixel, die nicht schwarz sind (also den Text)
+        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return binary_img # Nichts gefunden, gebe Original zurück
+
+        # Wir suchen das umschließende Rechteck für ALLE Konturen zusammen
+        min_x = binary_img.shape[1]
+        min_y = binary_img.shape[0]
+        max_x = 0
+        max_y = 0
+
+        found_something = False
+        for c in contours:
+            # Kleine Störungen ignorieren (Rauschen)
+            if cv2.contourArea(c) < 50: 
+                continue
+            
+            x, y, w, h = cv2.boundingRect(c)
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x + w)
+            max_y = max(max_y, y + h)
+            found_something = True
+
+        if not found_something:
+            return binary_img
+
+        # Ein bisschen Padding (Rand) hinzufügen, damit Buchstaben nicht am Rand kleben
+        padding = 10
+        min_x = max(0, min_x - padding)
+        min_y = max(0, min_y - padding)
+        max_x = min(binary_img.shape[1], max_x + padding)
+        max_y = min(binary_img.shape[0], max_y + padding)
+
+        # Zuschneiden
+        cropped = binary_img[min_y:max_y, min_x:max_x]
+        return cropped
 
     def find_text_region(self, img):
         """Findet den Bereich per Template."""
@@ -140,45 +188,36 @@ class OCRExtractor:
         img = self.get_monitor_screenshot()
         if img is None: return "Kein Text gefunden"
 
+        # 1. Grober Crop (Template Frame)
         cropped_img, coords = self.find_text_region(img)
         
         if cropped_img is None:
             log_message("Kein Dialog-Template erkannt.")
             return "Kein Text gefunden"
 
-        # --- DEBUG BILD 1: Ausschnitt ---
         if self.config.get("debug_mode", False):
-            try:
-                cv2.imwrite("debug_detection_view.png", cropped_img)
+            try: cv2.imwrite("debug_detection_view.png", cropped_img)
             except: pass
 
-        # Bildverarbeitung (Farben filtern)
+        # 2. Farbisolierung (Schwarz auf Weiß)
         processed_img = self.isolate_text_colors(cropped_img)
 
-        # === NEU: UPSCALING FÜR BESSERE UMLAUTE ===
-        # Vergrößert das Bild um Faktor 2.5 mit kubischer Interpolation.
-        # Das hilft Tesseract extrem bei Punkten auf i, ö, ä, ü.
+        # 3. FEINER CROP (Schneidet leere Ränder weg) <--- NEU
+        processed_img = self.crop_to_text_content(processed_img)
+
+        # 4. Upscaling für bessere Umlaute
         processed_img = cv2.resize(processed_img, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
         
-        # Optional: Leichtes Weichzeichnen nach Upscale entfernt Pixel-Artefakte
-        # processed_img = cv2.GaussianBlur(processed_img, (3, 3), 0)
-
-        # --- DEBUG BILD 2: OCR Input (Vergrößert) ---
         if self.config.get("debug_mode", False):
-            try:
-                cv2.imwrite("debug_ocr_input.png", processed_img)
+            try: cv2.imwrite("debug_ocr_input.png", processed_img)
             except: pass
 
         # Tesseract Config
         psm = self.config.get("ocr_psm", 6)
-        # Stelle sicher, dass "deu" genutzt wird für Umlaute!
         lang = self.config.get("ocr_language", "deu+eng") 
         whitelist = self.config.get("ocr_whitelist", "")
         
         custom_config = f'--psm {psm}'
-        
-        # Whitelist ist gefährlich für Umlaute, wenn man sie in der Config falsch eingibt.
-        # Wenn Umlaute fehlen, lösche den Inhalt der Whitelist in den Einstellungen!
         if whitelist and len(whitelist) > 5:
             custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
             
@@ -186,15 +225,11 @@ class OCRExtractor:
             txt = pytesseract.image_to_string(processed_img, lang=lang, config=custom_config)
             result = txt.strip()
             
-            # === NEU: DEBUG TEXT DATEI ===
             if self.config.get("debug_mode", False):
                 try:
                     with open("debug_ocr_text.txt", "w", encoding="utf-8") as f:
-                        f.write(f"--- OCR ROHDATEN ---\nConfig: {custom_config}\nSprache: {lang}\n\nErgebnis:\n{result}")
-                        log_message("Debug-Text in 'debug_ocr_text.txt' gespeichert.")
-                except Exception as e:
-                    log_message(f"Konnte Debug-Text nicht speichern: {e}")
-            # ==============================
+                        f.write(f"--- OCR ROHDATEN ---\nErgebnis:\n{result}")
+                except: pass
 
             if not result: return "Kein Text gefunden"
             return result
