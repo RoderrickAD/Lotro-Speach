@@ -120,7 +120,7 @@ class OCRExtractor:
         
         # --- TOLERANZ ANPASSUNG ---
         # War 0.80 -> Jetzt 0.60 (Viel toleranter)
-        threshold = 0.60 
+        threshold = 0.80 
 
         for key, template_img in self.templates.items():
             res = cv2.matchTemplate(gray_screenshot, template_img, cv2.TM_CCOEFF_NORMED)
@@ -146,7 +146,7 @@ class OCRExtractor:
             final_x2 = max(found_positions["top_right"][0] + w_tr, found_positions["bottom_right"][0] + w_br)
             final_y2 = max(found_positions["bottom_left"][1] + h_bl, found_positions["bottom_right"][1] + h_br)
             
-            padding = 10
+            padding = -10
             final_x1 = max(0, final_x1 - padding)
             final_y1 = max(0, final_y1 - padding)
             final_x2 = min(w_img, final_x2 + padding)
