@@ -1,12 +1,14 @@
-# Mindestanforderungen für Ihr Projekt
 pyinstaller
 pytesseract
 opencv-python
 mss
-numpy
+# HIER IST DER FIX: Wir verbieten Version 2.0+
+numpy<2.0.0
 requests
 pygame
 keyboard
-# Wenn Sie tkinter nicht standardmäßig verwenden:
+pywin32
 Pillow
+google-generativeai
 easyocr
+pyttsx3
