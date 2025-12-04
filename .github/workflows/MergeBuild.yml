@@ -23,6 +23,8 @@ jobs:
       run: |
         pip install pyinstaller
         pip install easyocr
+        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+        pip install TTS
         pip install google-generativeai
         pip install -r requirements.txt
 
