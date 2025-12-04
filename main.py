@@ -11,13 +11,13 @@ from core import CoreEngine
 from utils import save_config, log_message
 
 # --- LOTRO THEME COLORS ---
-COLOR_BG_DARK = "#1a1110"
-COLOR_BG_PANEL = "#2b221b"      # <--- Korrekter Name
-COLOR_TEXT_GOLD = "#c5a059"
-COLOR_TEXT_DIM = "#8c7b70"
-COLOR_ACCENT_RED = "#5c1815"
-COLOR_ACCENT_GREEN = "#3a4f32"
-COLOR_INPUT_BG = "#0f0a08"
+COLOR_BG_DARK = "#1a1110"       # Hintergrund Schwarz/Braun
+COLOR_BG_PANEL = "#2b221b"      # Panel Farbe (Leder)
+COLOR_TEXT_GOLD = "#c5a059"     # Schrift Gold
+COLOR_TEXT_DIM = "#8c7b70"      # Schrift Dunkel
+COLOR_ACCENT_RED = "#5c1815"    # Akzent Rot
+COLOR_ACCENT_GREEN = "#3a4f32"  # Akzent Grün
+COLOR_INPUT_BG = "#0f0a08"      # Input Feld Hintergrund
 
 FONT_TITLE = ("Georgia", 16, "bold")
 FONT_UI = ("Georgia", 11)
@@ -31,6 +31,7 @@ except:
     pass
 
 class DraggableRect:
+    """Klasse für die verschiebbaren Rahmen in der Kalibrierung."""
     def __init__(self, canvas, x, y, size, name, label_text):
         self.canvas = canvas
         self.name = name
@@ -47,21 +48,25 @@ class DraggableRect:
 
     def draw(self):
         self.canvas.delete(self.tag_root)
+        # Rahmen
         self.canvas.create_rectangle(self.x, self.y, self.x+self.w, self.y+self.h, 
                                      outline=COLOR_TEXT_GOLD, width=3, 
                                      fill="gray25", stipple="gray25", 
                                      tags=(self.tag_root, self.tag_rect))
         
+        # Resize Handle (unten rechts)
         handle_sz = 15
         self.canvas.create_rectangle(self.x+self.w-handle_sz, self.y+self.h-handle_sz, 
                                      self.x+self.w, self.y+self.h, 
                                      fill="red", outline="white", 
                                      tags=(self.tag_root, self.tag_handle))
         
+        # Fadenkreuz (Mitte)
         cx, cy = self.x + self.w/2, self.y + self.h/2
         self.canvas.create_line(cx, self.y, cx, self.y+self.h, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
         self.canvas.create_line(self.x, cy, self.x+self.w, cy, fill=COLOR_ACCENT_RED, dash=(2,2), tags=self.tag_root)
         
+        # Label
         self.canvas.create_text(self.x, self.y-12, text=self.name.replace("_", " ").title(), 
                                 fill=COLOR_TEXT_GOLD, anchor="sw", font=("Arial", 10, "bold"), 
                                 tags=self.tag_root)
@@ -84,9 +89,10 @@ class LotroApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Der Vorleser von Mittelerde - Companion 2.0")
-        self.root.geometry("1150x950")
+        self.root.geometry("1200x950")
         self.root.configure(bg=COLOR_BG_DARK)
         
+        # Icon laden
         if os.path.exists("app_icon.ico"):
             self.root.iconbitmap("app_icon.ico")
             try:
@@ -116,12 +122,12 @@ class LotroApp:
         self.load_settings_to_ui()
         self.register_hotkey()
 
+        # Variablen
         self.calib_img_raw = None
         self.template_rects = {} 
         self.active_rect = None
         self.action_mode = None
         self.last_mouse = (0, 0)
-
         self.debug_photo_1 = None
         self.debug_photo_2 = None
 
@@ -210,7 +216,6 @@ class LotroApp:
                     target_h = 200
                     aspect = img.width / img.height
                     target_w = int(target_h * aspect)
-                    
                     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
                     photo = ImageTk.PhotoImage(img)
                     label.config(image=photo, text="", width=0, height=0)
@@ -265,6 +270,7 @@ class LotroApp:
 
         self.create_lotro_button(frame_controls, "Speichern & Testen", self.save_and_test_ocr, color=COLOR_TEXT_GOLD).pack(fill="x", pady=30)
 
+    # --- MAUS LOGIK ---
     def on_mouse_down(self, event):
         if not self.calib_img_raw is None:
             cx = self.calib_canvas.canvasx(event.x)
@@ -385,6 +391,7 @@ class LotroApp:
             save_config(cfg)
             self.engine.ocr_extractor.config = cfg
             
+            # --- UPDATE: Tuple return ---
             txt, src = self.engine.run_pipeline(skip_audio=True)
             self.update_ui_text(f"--- TEST ({src}) ---\n{txt}")
             
@@ -399,150 +406,88 @@ class LotroApp:
         sf = ttk.Frame(self.tab_settings, padding=20)
         sf.pack(fill="both", expand=True)
         
-        ttk.Label(sf, text="Die Stimme (ElevenLabs API Key)", style="Header.TLabel").pack(anchor="w")
-        self.ent_api_key = self.create_entry(sf, show="*")
-        self.ent_api_key.pack(fill="x", pady=5)
+        # --- TTS SECTION ---
+        ttk.Label(sf, text="Die Stimme (Audio Engine)", style="Header.TLabel").pack(anchor="w")
+        self.var_tts_provider = tk.StringVar(value="elevenlabs")
         
+        # 1. ElevenLabs
+        f_el = ttk.Frame(sf); f_el.pack(fill="x", pady=5)
+        tk.Radiobutton(f_el, text="ElevenLabs (Cloud, Premium)", variable=self.var_tts_provider, value="elevenlabs", 
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w")
+        f_el_in = ttk.Frame(f_el, padding=(20, 0)); f_el_in.pack(fill="x")
+        ttk.Label(f_el_in, text="API Key:").pack(side="left")
+        self.ent_api_key = self.create_entry(f_el_in, show="*"); self.ent_api_key.pack(side="left", fill="x", expand=True, padx=5)
+
+        # 2. Coqui XTTS
+        f_xtts = ttk.Frame(sf); f_xtts.pack(fill="x", pady=5)
+        tk.Radiobutton(f_xtts, text="Coqui XTTS (Lokal, KI-Voice Cloning, Schwer)", variable=self.var_tts_provider, value="xtts",
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w")
+        f_xtts_in = ttk.Frame(f_xtts, padding=(20, 0)); f_xtts_in.pack(fill="x")
+        ttk.Label(f_xtts_in, text="Stimme (.wav):").pack(side="left")
+        self.cmb_xtts_voice = ttk.Combobox(f_xtts_in, state="readonly", width=30); self.cmb_xtts_voice.pack(side="left", padx=5)
+        tk.Button(f_xtts_in, text="Scan", command=self.refresh_xtts_voices, bg=COLOR_BG_PANEL, fg=COLOR_TEXT_DIM, relief="flat", font=("Arial", 8)).pack(side="left")
+
+        # 3. Local System
+        f_sys = ttk.Frame(sf); f_sys.pack(fill="x", pady=5)
+        tk.Radiobutton(f_sys, text="Windows Systemstimme (Lokal, Schnell)", variable=self.var_tts_provider, value="local",
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w")
+        f_loc_in = ttk.Frame(f_sys, padding=(20, 0)); f_loc_in.pack(fill="x")
+        ttk.Label(f_loc_in, text="Stimme:").pack(side="left")
+        self.cmb_local_voice = ttk.Combobox(f_loc_in, state="readonly", width=40); self.cmb_local_voice.pack(side="left", padx=5)
+
+        # --- KI OCR SECTION ---
         ttk.Label(sf, text="Der Gelehrte (Google Gemini AI OCR)", style="Header.TLabel").pack(anchor="w", pady=(20,0))
-        ttk.Label(sf, text="API Key:").pack(anchor="w")
-        self.ent_gemini_key = self.create_entry(sf, show="*")
-        self.ent_gemini_key.pack(fill="x", pady=5)
+        f_gem = ttk.Frame(sf); f_gem.pack(fill="x", pady=5)
+        ttk.Label(f_gem, text="API Key:").pack(side="left")
+        self.ent_gemini_key = self.create_entry(f_gem, show="*"); self.ent_gemini_key.pack(side="left", fill="x", expand=True, padx=5)
         
-        # Checkbox & Modell
-        frm_ai = ttk.Frame(sf)
-        frm_ai.pack(fill="x", pady=5)
+        frm_ai = ttk.Frame(sf); frm_ai.pack(fill="x", pady=5)
         self.var_use_ai = tk.BooleanVar()
-        tk.Checkbutton(frm_ai, text="Nutze Google Gemini AI statt Tesseract", variable=self.var_use_ai, 
-                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
-                       activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(side="left")
+        tk.Checkbutton(frm_ai, text="Nutze Google Gemini AI statt EasyOCR", variable=self.var_use_ai, 
+                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(side="left")
         
-        frm_mdl = ttk.Frame(sf)
-        frm_mdl.pack(fill="x", pady=2)
+        frm_mdl = ttk.Frame(sf); frm_mdl.pack(fill="x", pady=2)
         ttk.Label(frm_mdl, text="Modell:").pack(side="left")
         self.cmb_gemini_model = ttk.Combobox(frm_mdl, 
-                                             values=["models/gemini-2.5-flash", "models/gemini-2.0-flash", "models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-2.0-flash-exp"], 
+                                             values=["models/gemini-2.5-flash", "models/gemini-2.0-flash", "models/gemini-1.5-flash", "models/gemini-2.0-flash-exp"], 
                                              width=30, state="readonly")
         self.cmb_gemini_model.pack(side="left", padx=10)
         self.create_lotro_button(frm_mdl, "Laden", self.fetch_gemini_models, color=COLOR_BG_PANEL).pack(side="left")
 
-        ttk.Label(sf, text="Das Auge (Tesseract & Monitor)", style="Header.TLabel").pack(anchor="w", pady=(20,0))
-        f_tess = ttk.Frame(sf)
-        f_tess.pack(fill="x", pady=5)
-        ttk.Label(f_tess, text="Pfad:").pack(side="left")
-        self.ent_tesseract = self.create_entry(f_tess)
-        self.ent_tesseract.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Label(f_tess, text="Monitor:").pack(side="left")
-        self.cmb_monitor = ttk.Combobox(f_tess, values=["1", "2", "3"], width=3, state="readonly")
-        self.cmb_monitor.pack(side="left")
-
-        ttk.Label(sf, text="Zauberspruch (Hotkey)", style="Header.TLabel").pack(anchor="w", pady=(20,0))
-        self.ent_hotkey = self.create_entry(sf)
-        self.ent_hotkey.pack(fill="x", pady=5)
+        # --- OTHER ---
+        ttk.Label(sf, text="Sonstiges (Pfad & Hotkey)", style="Header.TLabel").pack(anchor="w", pady=(20,0))
+        f_ot = ttk.Frame(sf); f_ot.pack(fill="x", pady=5)
+        ttk.Label(f_ot, text="Monitor:").pack(side="left")
+        self.cmb_monitor = ttk.Combobox(f_ot, values=["1", "2", "3"], width=3, state="readonly"); self.cmb_monitor.pack(side="left", padx=5)
+        ttk.Label(f_ot, text="Hotkey:").pack(side="left")
+        self.ent_hotkey = self.create_entry(f_ot); self.ent_hotkey.pack(side="left", fill="x", expand=True, padx=5)
         
         self.var_debug = tk.BooleanVar()
-        tk.Checkbutton(sf, text="Visionen aufzeichnen (Debug)", variable=self.var_debug, 
-                       bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, 
-                       activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w", pady=15)
+        tk.Checkbutton(sf, text="Debug Modus", variable=self.var_debug, bg=COLOR_BG_PANEL, fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INPUT_BG, activebackground=COLOR_BG_PANEL, activeforeground=COLOR_TEXT_GOLD).pack(anchor="w", pady=15)
         
         self.create_lotro_button(sf, "In Stein meißeln (Speichern)", self.save_settings, color=COLOR_TEXT_GOLD).pack(fill="x", pady=30)
 
     def fetch_gemini_models(self):
         key = self.ent_gemini_key.get().strip()
-        if not key:
-            messagebox.showerror("Fehler", "Bitte erst einen API Key eingeben.")
-            return
+        if not key: messagebox.showerror("Fehler", "Bitte erst einen API Key eingeben."); return
         try:
             models = self.engine.ocr_extractor.fetch_available_models(key)
             if models:
                 self.cmb_gemini_model['values'] = models
                 self.cmb_gemini_model.set(models[0])
                 messagebox.showinfo("Erfolg", f"{len(models)} Modelle gefunden.")
-            else:
-                messagebox.showwarning("Info", "Keine passenden Modelle gefunden.")
-        except Exception as e:
-            messagebox.showerror("Fehler", str(e))
+            else: messagebox.showwarning("Info", "Keine passenden Modelle gefunden.")
+        except Exception as e: messagebox.showerror("Fehler", str(e))
+
+    def refresh_xtts_voices(self):
+        files = self.engine.tts_service.get_available_xtts_voices()
+        if files:
+            self.cmb_xtts_voice['values'] = files
+            curr = self.engine.config.get("xtts_reference_wav", "")
+            self.cmb_xtts_voice.set(curr if curr in files else files[0])
+        else: self.cmb_xtts_voice['values'] = ["(Leer)"]; self.cmb_xtts_voice.current(0)
 
     def load_settings_to_ui(self):
         c = self.engine.config
-        self.ent_api_key.insert(0, c.get("api_key", ""))
-        self.ent_gemini_key.insert(0, c.get("gemini_api_key", ""))
-        self.var_use_ai.set(c.get("use_ai_ocr", False))
-        
-        self.cmb_gemini_model.set(c.get("gemini_model_name", "models/gemini-1.5-flash"))
-        
-        self.ent_tesseract.insert(0, c.get("tesseract_path", ""))
-        self.ent_hotkey.insert(0, c.get("hotkey", "ctrl+alt+s"))
-        self.cmb_monitor.set(str(c.get("monitor_index", 1)))
-        self.var_debug.set(c.get("debug_mode", False))
-        
-        self.spin_top.delete(0, "end"); self.spin_top.insert(0, c.get("padding_top", 10))
-        self.spin_bottom.delete(0, "end"); self.spin_bottom.insert(0, c.get("padding_bottom", 20))
-        self.spin_left.delete(0, "end"); self.spin_left.insert(0, c.get("padding_left", 10))
-        self.spin_right.delete(0, "end"); self.spin_right.insert(0, c.get("padding_right", 50))
-
-    def save_settings(self):
-        c = self.engine.config
-        c["api_key"] = self.ent_api_key.get().strip()
-        c["gemini_api_key"] = self.ent_gemini_key.get().strip()
-        c["use_ai_ocr"] = self.var_use_ai.get()
-        c["gemini_model_name"] = self.cmb_gemini_model.get().strip()
-        
-        c["tesseract_path"] = self.ent_tesseract.get().strip()
-        c["hotkey"] = self.ent_hotkey.get().strip()
-        try:
-            c["monitor_index"] = int(self.cmb_monitor.get())
-            c["debug_mode"] = self.var_debug.get()
-        except: pass
-        
-        save_config(c)
-        self.engine.config = c
-        self.engine.ocr_extractor.config = c
-        self.engine.ocr_extractor.pytesseract.pytesseract.tesseract_cmd = c["tesseract_path"]
-        
-        self.engine.ocr_extractor._setup_ai() 
-        
-        self.register_hotkey()
-        messagebox.showinfo("Gespeichert", "Einstellungen wurden übernommen.")
-
-    def register_hotkey(self):
-        hk = self.engine.config.get("hotkey", "ctrl+alt+s")
-        try: keyboard.unhook_all_hotkeys()
-        except: pass
-        try: self.hotkey_hook = keyboard.add_hotkey(hk, lambda: self.root.after(0, self.run_once_manual))
-        except: log_message(f"Fehler bei Hotkey {hk}")
-        try: keyboard.add_hotkey("play/pause media", lambda: self.engine.tts_service.toggle_pause())
-        except: pass
-
-    def run_once_manual(self):
-        self.lbl_status.config(text="Das Auge sieht...", foreground=COLOR_TEXT_GOLD)
-        threading.Thread(target=self.process_pipeline, daemon=True).start()
-
-    def process_pipeline(self):
-        try:
-            txt, src = self.engine.run_pipeline()
-            if not txt:
-                self.root.after(0, lambda: self.update_status("Kein Text.", error=True))
-                return
-            
-            self.root.after(0, lambda: self.update_ui_text(txt))
-            self.root.after(0, lambda: self.load_debug_images()) 
-            self.root.after(0, lambda: self.update_status(f"Fertig (via {src}).", done=True))
-        except Exception as e:
-            self.root.after(0, lambda: self.update_status(f"Fehler: {e}", error=True))
-
-    def update_ui_text(self, txt):
-        self.txt_preview.config(state="normal")
-        self.txt_preview.delete(1.0, tk.END)
-        self.txt_preview.insert(tk.END, txt)
-        self.txt_preview.config(state="disabled")
-
-    def update_status(self, text, error=False, done=False):
-        color = COLOR_ACCENT_RED if error else (COLOR_ACCENT_GREEN if done else COLOR_TEXT_GOLD)
-        self.lbl_status.config(text=text, foreground=color)
-
-if __name__ == "__main__":
-    from utils import load_config
-    load_config() 
-    root = tk.Tk()
-    app = LotroApp(root)
-    root.mainloop()
+        # API Keys
+        self.ent_api
