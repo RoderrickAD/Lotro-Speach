@@ -9,3 +9,4 @@ pygame
 keyboard
 # Wenn Sie tkinter nicht standardmäßig verwenden:
 Pillow
+easyocr
