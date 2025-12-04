@@ -1,4 +1,4 @@
-import pytesseract
+import easyocr  # NEU: Statt pytesseract
 import cv2
 import numpy as np
 import mss 
@@ -12,39 +12,48 @@ class OCRExtractor:
     def __init__(self, config):
         self.config = config
         
-        tess_path = self.config.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
-        pytesseract.pytesseract.tesseract_cmd = tess_path
+        # --- EASYOCR INITIALISIERUNG (NEU) ---
+        # Wir laden Deutsch ('de') und Englisch ('en') in den Speicher.
+        # gpu=True beschleunigt es massiv, falls du eine NVIDIA Karte hast.
+        # Falls es Fehler gibt, setze gpu=False.
+        log_message("Lade EasyOCR Modelle (das kann beim ersten Mal kurz dauern)...")
+        try:
+            self.reader = easyocr.Reader(['de', 'en'], gpu=True)
+            log_message("EasyOCR bereit.")
+        except Exception as e:
+            log_message(f"EasyOCR GPU Fehler (nutze CPU): {e}")
+            self.reader = easyocr.Reader(['de', 'en'], gpu=False)
+        # -------------------------------------
         
+        # Gemini Init (bleibt bestehen als Premium Option)
         self.ai_model = None
         self._setup_ai()
+
         self.templates = self._load_templates()
 
     def _setup_ai(self):
-        """Initialisiert die KI mit Key und gewähltem Modell."""
+        """Konfiguriert die KI, falls ein Key da ist."""
         key = self.config.get("gemini_api_key", "").strip()
-        model_name = self.config.get("gemini_model_name", "models/gemini-1.5-flash") # Fallback
+        model_name = self.config.get("gemini_model_name", "models/gemini-1.5-flash")
         
         if key:
             try:
                 genai.configure(api_key=key)
                 self.ai_model = genai.GenerativeModel(model_name)
-                log_message(f"KI konfiguriert mit Modell: {model_name}")
             except Exception as e:
                 log_message(f"Fehler bei KI-Start: {e}")
 
     def fetch_available_models(self, api_key):
-        """Fragt Google nach allen verfügbaren Modellen."""
+        """Hilfsfunktion für die UI."""
         try:
             genai.configure(api_key=api_key)
             models = []
             for m in genai.list_models():
-                # Wir wollen nur Modelle, die Content generieren können (keine Embedding-Modelle)
                 if 'generateContent' in m.supported_generation_methods:
                     models.append(m.name)
             models.sort()
             return models
         except Exception as e:
-            log_message(f"Fehler beim Laden der Modell-Liste: {e}")
             return []
 
     def _load_templates(self):
@@ -149,24 +158,35 @@ class OCRExtractor:
             log_message(f"Starte KI-Erkennung ({self.config.get('gemini_model_name', 'Default')})...")
             return self.run_ai_recognition(cropped_img), "Gemini AI"
         else:
+            # --- START EASYOCR LOGIK ---
             processed_img = self.isolate_text_colors(cropped_img)
             processed_img = self.crop_to_text_content(processed_img)
-            processed_img = cv2.resize(processed_img, None, fx=4.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
+            
+            # EasyOCR mag das Bild oft lieber ohne extremes Upscaling, aber probieren wir es
+            # moderat. Faktor 2 ist meistens gut für EasyOCR bei Pixel-Art.
+            processed_img = cv2.resize(processed_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+            
+            # Wichtig: EasyOCR kommt besser mit Graustufen oder Farbe klar als mit 
+            # hartem Schwarz-Weiß Thresholding, aber da wir die Farben schon gefiltert haben,
+            # behalten wir das binäre Bild bei, da es sehr sauber ist.
             _, processed_img = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY)
             
             if self.config.get("debug_mode", False):
                 try: cv2.imwrite("debug_ocr_input.png", processed_img)
                 except: pass
 
-            psm = self.config.get("ocr_psm", 6)
-            lang = self.config.get("ocr_language", "deu+eng")
-            custom_config = f'--psm {psm} -c preserve_interword_spaces=1'
-            whitelist = self.config.get("ocr_whitelist", "")
-            if whitelist and len(whitelist) > 5: custom_config += f' -c tessedit_char_whitelist="{whitelist}"'
-            
             try:
-                txt = pytesseract.image_to_string(processed_img, lang=lang, config=custom_config)
-                return " ".join(txt.strip().split()), "Tesseract OCR"
+                # detail=0 gibt uns direkt eine Liste von Strings zurück ['Wort1', 'Wort2']
+                # paragraph=False ist Standard, das ist okay, wir joinen alles.
+                result_list = self.reader.readtext(processed_img, detail=0)
+                
+                # Liste zu einem String zusammenfügen
+                full_text = " ".join(result_list)
+                
+                if not full_text.strip():
+                    return "Kein Text gefunden", "EasyOCR"
+                    
+                return full_text, "EasyOCR"
             except Exception as e:
-                log_message(f"Tesseract Fehler: {e}")
+                log_message(f"EasyOCR Fehler: {e}")
                 return "Kein Text gefunden", "Fehler"
